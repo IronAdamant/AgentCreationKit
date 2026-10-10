@@ -20,6 +20,9 @@
                    RNAM (response) or UNAM (display text)
     rec.copy     | SOURCE_EDID | NEW_EDID                             copy a record (from the target or any master)
                    into the target as a new record; skipped if NEW_EDID already exists
+    list.add     | EDID | LIST_PATH | TEMPLATE_INDEX | Field=Value ; Field=Value
+                   append a copy of entry #TEMPLATE_INDEX of a list (e.g. VMAD\Script Fragments\Fragments) and
+                   set fields on the copy (values may be @EDID)
     field.set    | EDID | PATH | VALUE                                set any field by xEdit path, e.g.
                    Effects\[1]\EFID or Magic Effect Data\DATA\Perk to Apply. VALUE @SOME_EDID is
                    replaced by that record's FormID
@@ -307,6 +310,36 @@ begin
       end;
     end;
     Fail(line, 'menu item ' + a + ' not found');
+  end
+  else if op = 'list.add' then begin
+    effs := ElementByPath(rec, a);
+    i := StrToInt(b);
+    if (not Assigned(effs)) or (i >= ElementCount(effs)) then begin
+      Fail(line, 'list ' + a + ' or its entry #' + b + ' not found');
+      Exit;
+    end;
+    p := ElementAssign(effs, HighInteger, ElementByIndex(effs, i), False);
+    before := '';
+    while c <> '' do begin
+      i := Pos(';', c);
+      if i = 0 then begin
+        d := Trim(c);
+        c := '';
+      end
+      else begin
+        d := Trim(Copy(c, 1, i - 1));
+        c := Copy(c, i + 1, Length(c));
+      end;
+      i := Pos('=', d);
+      if Resolve(Trim(Copy(d, i + 1, Length(d)))) = '' then begin
+        RemoveElement(effs, p);
+        Fail(line, 'reference not found: ' + d);
+        Exit;
+      end;
+      SetElementEditValues(p, Trim(Copy(d, 1, i - 1)), Resolve(Trim(Copy(d, i + 1, Length(d)))));
+      before := before + Trim(Copy(d, 1, i - 1)) + '=' + GetElementEditValues(p, Trim(Copy(d, 1, i - 1))) + '  ';
+    end;
+    Ok(line, 'added entry to ' + a + ' (now ' + IntToStr(ElementCount(effs)) + '): ' + before);
   end
   else if op = 'field.set' then begin
     p := ElementByPath(rec, a);
