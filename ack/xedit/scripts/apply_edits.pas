@@ -25,11 +25,14 @@
                    set fields on the copy (values may be @EDID)
     field.remove | EDID | PARENT_PATH | CHILD                          remove an optional subrecord, e.g.
                    Model | MODT (a model's texture-hash data, stale once the model path changes)
+                   PARENT_PATH . means the record itself, e.g. . | VMAD
     rec.delete   | EDID                                               delete a record from the target. Only for
                    records nothing references - check that first (xEdit's own reference info may not be built yet)
     field.set    | EDID | PATH | VALUE                                set any field by xEdit path, e.g.
                    Effects\[1]\EFID or Magic Effect Data\DATA\Perk to Apply. VALUE @SOME_EDID is
                    replaced by that record's FormID
+    field.add    | EDID | PATH | VALUE                                like field.set, but first adds the field
+                   if the record lacks it (e.g. an OMOD's LNAM loose mod)
 
   PROPERTY[key]#n selects the n-th (1-based, default 1) property with that name; [key] filters on Value 1,
   e.g. DamageTypeValues[dtEnergy]#2. VALUE goes to Value 2 for "FormID,Float"/"FormID,Int" properties
@@ -346,7 +349,10 @@ begin
     Ok(line, 'added entry to ' + a + ' (now ' + IntToStr(ElementCount(effs)) + '): ' + before);
   end
   else if op = 'field.remove' then begin
-    p := ElementByPath(rec, a);
+    if a = '.' then
+      p := rec
+    else
+      p := ElementByPath(rec, a);
     if not Assigned(p) then begin
       Fail(line, 'parent not found: ' + a);
       Exit;
@@ -363,8 +369,10 @@ begin
     Remove(rec);
     Ok(line, 'deleted ' + before);
   end
-  else if op = 'field.set' then begin
+  else if (op = 'field.set') or (op = 'field.add') then begin
     p := ElementByPath(rec, a);
+    if (op = 'field.add') and not Assigned(p) then
+      p := Add(rec, a, True);
     if not Assigned(p) then begin
       Fail(line, 'field not found: ' + a);
       Exit;
