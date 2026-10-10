@@ -8,11 +8,14 @@
     prop.remove  | OMOD_EDID | PROPERTY[key]#n                        delete a property
     prop.add     | OMOD_EDID | PROPERTY | FUNCTION | VALUE | TEMPLATE_OMOD_EDID [| KEY_VALUE]
                    add a property, cloned from the first PROPERTY entry on TEMPLATE (gives the right value type);
-                   KEY_VALUE sets Value 1 for keyed properties such as DamageTypeValues (e.g. dtCryo)
+                   KEY_VALUE sets Value 1 for keyed properties such as DamageTypeValues (a FormID, or
+                   @EDID, e.g. @A1ALMEnch_... for an Enchantments property)
     text.set     | EDID | PATH | NEW TEXT                             set a string field (FULL, DESC, ...)
     text.replace | EDID | PATH | OLD | NEW                            replace a substring in a string field
     effect.remove    | ENCH/SPEL_EDID | INDEX                         remove effect #INDEX (0-based)
     effect.magnitude | ENCH/SPEL_EDID | INDEX | VALUE                 set effect #INDEX's magnitude
+    effect.add   | ENCH/SPEL_EDID | TEMPLATE_INDEX | @MGEF_EDID          append a copy of effect #TEMPLATE_INDEX
+                   (magnitude, duration, conditions) with its base effect set to MGEF
     menu.set     | TERM_EDID | ITEM_ID | FIELD | NEW TEXT             set a terminal menu item's ITXT (label),
                    RNAM (response) or UNAM (display text)
     rec.copy     | SOURCE_EDID | NEW_EDID                             copy a record (from the target or any master)
@@ -231,8 +234,15 @@ begin
       Exit;
     end;
     p := ElementAssign(ElementByPath(rec, 'DATA\Properties'), HighInteger, tmpl, False);
-    if Field(line, 6) <> '' then
-      SetElementEditValues(p, 'Value 1', Field(line, 6));
+    if Field(line, 6) <> '' then begin
+      before := Resolve(Field(line, 6));
+      if before = '' then begin
+        Fail(line, 'reference not found: ' + Field(line, 6));
+        RemoveElement(ElementByPath(rec, 'DATA\Properties'), p);
+        Exit;
+      end;
+      SetElementEditValues(p, 'Value 1', before);
+    end;
     SetPropValue(p, b, c);
     Ok(line, 'added ' + PropDesc(p));
   end
@@ -267,6 +277,23 @@ begin
       SetElementEditValues(p, 'EFIT\Magnitude', b);
       Ok(line, before + '  =>  mag ' + GetElementEditValues(p, 'EFIT\Magnitude'));
     end;
+  end
+  else if op = 'effect.add' then begin
+    effs := Effects(rec);
+    i := StrToInt(a);
+    if (not Assigned(effs)) or (i >= ElementCount(effs)) then begin
+      Fail(line, 'template effect #' + a + ' not found');
+      Exit;
+    end;
+    c := Resolve(b);
+    if c = '' then begin
+      Fail(line, 'reference not found: ' + b);
+      Exit;
+    end;
+    p := ElementAssign(effs, HighInteger, ElementByIndex(effs, i), False);
+    SetElementEditValues(p, 'EFID', c);
+    Ok(line, 'added effect ' + GetElementEditValues(p, 'EFID') + ' mag ' + GetElementEditValues(p, 'EFIT\Magnitude') +
+      ' (now ' + IntToStr(ElementCount(effs)) + ' effects)');
   end
   else if op = 'menu.set' then begin
     items := ElementByName(rec, 'Menu Items');
