@@ -15,6 +15,11 @@
     effect.magnitude | ENCH/SPEL_EDID | INDEX | VALUE                 set effect #INDEX's magnitude
     menu.set     | TERM_EDID | ITEM_ID | FIELD | NEW TEXT             set a terminal menu item's ITXT (label),
                    RNAM (response) or UNAM (display text)
+    rec.copy     | SOURCE_EDID | NEW_EDID                             copy a record (from the target or any master)
+                   into the target as a new record; skipped if NEW_EDID already exists
+    field.set    | EDID | PATH | VALUE                                set any field by xEdit path, e.g.
+                   Effects\[1]\EFID or Magic Effect Data\DATA\Perk to Apply. VALUE @SOME_EDID is
+                   replaced by that record's FormID
 
   PROPERTY[key]#n selects the n-th (1-based, default 1) property with that name; [key] filters on Value 1,
   e.g. DamageTypeValues[dtEnergy]#2. VALUE goes to Value 2 for "FormID,Float"/"FormID,Int" properties
@@ -50,19 +55,50 @@ begin
   Result := Trim(s);
 end;
 
-function FindRec(edid: string): IInterface;
+function FindIn(fl: IInterface; edid: string): IInterface;
 var
   i: integer;
   g: IInterface;
 begin
   Result := nil;
-  for i := 0 to ElementCount(f) - 1 do begin
-    g := ElementByIndex(f, i);
+  for i := 0 to ElementCount(fl) - 1 do begin
+    g := ElementByIndex(fl, i);
     if Signature(g) = 'GRUP' then begin
       Result := MainRecordByEditorID(g, edid);
       if Assigned(Result) then
         Exit;
     end;
+  end;
+end;
+
+function FindRec(edid: string): IInterface;
+begin
+  Result := FindIn(f, edid);
+end;
+
+function FindAny(edid: string): IInterface;
+var
+  i: integer;
+begin
+  Result := FindRec(edid);
+  for i := FileCount - 1 downto 0 do begin
+    if Assigned(Result) then
+      Exit;
+    Result := FindIn(FileByIndex(i), edid);
+  end;
+end;
+
+function Resolve(value: string): string;
+var
+  r: IInterface;
+begin
+  Result := value;
+  if Copy(value, 1, 1) = '@' then begin
+    r := FindAny(Copy(value, 2, Length(value)));
+    if Assigned(r) then
+      Result := IntToHex(GetLoadOrderFormID(r), 8)
+    else
+      Result := '';
   end;
 end;
 
@@ -147,6 +183,21 @@ begin
   b := Field(line, 3);
   c := Field(line, 4);
   d := Field(line, 5);
+  if op = 'rec.copy' then begin
+    if Assigned(FindRec(a)) then begin
+      Ok(line, 'already present: ' + a);
+      Exit;
+    end;
+    rec := FindAny(edid);
+    if not Assigned(rec) then begin
+      Fail(line, 'source record not found: ' + edid);
+      Exit;
+    end;
+    p := wbCopyElementToFile(rec, f, True, True);
+    SetEditorID(p, a);
+    Ok(line, 'copied ' + Name(rec) + ' as ' + Name(p));
+    Exit;
+  end;
   rec := FindRec(edid);
   if not Assigned(rec) then begin
     Fail(line, 'record not found: ' + edid);
@@ -229,6 +280,21 @@ begin
       end;
     end;
     Fail(line, 'menu item ' + a + ' not found');
+  end
+  else if op = 'field.set' then begin
+    p := ElementByPath(rec, a);
+    if not Assigned(p) then begin
+      Fail(line, 'field not found: ' + a);
+      Exit;
+    end;
+    c := Resolve(b);
+    if c = '' then begin
+      Fail(line, 'reference not found: ' + b);
+      Exit;
+    end;
+    before := GetEditValue(p);
+    SetEditValue(p, c);
+    Ok(line, a + ': "' + before + '"  =>  "' + GetEditValue(p) + '"');
   end
   else
     Fail(line, 'unknown operation ' + op);
