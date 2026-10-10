@@ -37,7 +37,7 @@ class RunReport:
     target: str
     save: bool
     out_dir: str
-    outcome: str = 'pending'        # done | timeout | crashed
+    outcome: str = 'pending'        # done | script_error | timeout | crashed
     seconds: float = 0.0
     exit_code: int | None = None
     events: list = field(default_factory=list)
@@ -51,7 +51,16 @@ class RunReport:
         if self.unknown_dialogs:
             lines.append(f'  {len(self.unknown_dialogs)} unknown dialog(s) captured in {self.out_dir} - review and add rules')
         lines.append(f'  outputs: {", ".join(self.outputs) or "none"}')
+        if self.outcome == 'script_error':
+            log = Path(self.out_dir) / 'xedit_log.txt'
+            lines += ['  xEdit log (end):'] + ['    ' + l for l in log.read_text(encoding='utf8').splitlines()[-4:]]
         return '\n'.join(lines)
+
+
+def messages_text(main_hwnd: int) -> str:
+    """Text of xEdit's Messages pane (a TMemo on the main window)."""
+    memos = [c for c in win32.child_controls(main_hwnd) if c.cls == 'TMemo']
+    return max((win32.control_text(m.hwnd) for m in memos), key=len, default='')
 
 
 def _plugin_list(masters: list[str], target: str, after: list[str] | None = None) -> str:
@@ -102,9 +111,19 @@ def run(script: str, target: str, *, save: bool = False, masters: list[str] | No
     watcher = DialogWatcher(proc.pid, out, save)
     done_file = out / 'DONE.txt'
     close_sent = False
+    next_log_check = 0.0
     try:
         while proc.poll() is None:
             watcher.poll()
+            # A script error only shows up in xEdit's Messages pane: read it so the run fails at once
+            # instead of waiting for the timeout.
+            if watcher.main_hwnd and not done_file.exists() and time.time() > next_log_check:
+                next_log_check = time.time() + 2.0
+                log = messages_text(watcher.main_hwnd)
+                if 'Aborted: Applying script' in log:
+                    report.outcome = 'script_error'
+                    (out / 'xedit_log.txt').write_text('\n'.join(log.splitlines()[-40:]), encoding='utf8')
+                    break
             if done_file.exists() and not close_sent:
                 time.sleep(1.0)  # let xEdit finish writing / return from the script
                 if not save:

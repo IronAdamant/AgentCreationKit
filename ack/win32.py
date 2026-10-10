@@ -161,3 +161,17 @@ def screenshot_bmp(hwnd: int) -> bytes | None:
         gdi32.DeleteObject(bmp)
         gdi32.DeleteDC(mdc)
         user32.ReleaseDC(hwnd, wdc)
+
+
+def control_text(hwnd: int) -> str:
+    """Full text of a control in another process (WM_GETTEXT; GetWindowText only returns captions there).
+
+    xEdit's log memo answers WM_GETTEXTW with 8-bit text, so read raw bytes and decode them as UTF-8 if the
+    buffer does not hold real UTF-16."""
+    n = user32.SendMessageW(hwnd, 0x000E, 0, 0)  # WM_GETTEXTLENGTH
+    buf = ctypes.create_string_buffer(2 * n + 4)
+    user32.SendMessageW(hwnd, 0x000D, n + 1, ctypes.cast(buf, ctypes.c_void_p).value)  # WM_GETTEXT
+    raw = buf.raw
+    if n > 1 and raw[1:2] == b'\x00':  # real UTF-16 text
+        return raw.decode('utf-16-le', 'replace').split('\x00')[0]
+    return raw.split(b'\x00')[0].decode('utf-8', 'replace')

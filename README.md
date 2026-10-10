@@ -15,6 +15,7 @@ Python 3.10+, Windows, no third-party dependencies.
 | `ack.plugin` | Read and write plugin files (`.esp/.esm/.esl`) directly. Lossless: unmodified data is written back byte-for-byte (verified on `Fallout4.esm`, 1.5M records). |
 | `ack.archive` | Extract files from BA2 archives (general and texture archives; textures come out as `.dds`). |
 | `ack.nif` | Inspect NIF models and patch length-prefixed strings (e.g. texture paths) while keeping the block table valid. |
+| `ack.ck` | Drive a running Creation Kit like a level designer: load plugins, open cells, select objects, set exact position/rotation/scale, move the camera (zoom, pan, orbit), screenshot the render window, generate navmesh, compact form IDs, save. |
 
 ## Setup
 
@@ -32,6 +33,35 @@ python -m ack xedit run clean_masters "MyMod.esp" --save     # editing run
 python -m ack plugin info "D:/.../Data/MyMod.esp"
 python -m ack ba2 extract "D:/.../Fallout4 - Meshes.ba2" "meshes\effects\laser*" --out extracted
 ```
+
+## Driving the Creation Kit (`ack.ck`)
+
+```
+python -m ack ck load "MyMod.esp" --active "MyMod.esp"   # File > Data: exactly these plugins
+python -m ack ck cell MyInteriorCell                      # open it in the render window
+python -m ack ck refs                                     # references in the cell
+python -m ack ck ref MyChestRef                           # read position / rotation / scale
+python -m ack ck ref MyChestRef --rot _ _ 180             # set them ('_' keeps an axis)
+python -m ack ck select MyChestRef                        # select it and fly the camera there
+python -m ack ck camera zoom -40 | pan DX DY | orbit DX DY | top | bright
+python -m ack ck shot out.png                             # screenshot of the render window
+python -m ack ck navmesh                                  # Recast navmesh for the cell, then finalize
+python -m ack ck compact                                  # Compact Active File Form IDs
+python -m ack ck save
+```
+
+Menus, lists and buttons are driven with window messages. The render window and the Reference dialog only
+respond to a person, so those commands use real mouse and keyboard input: they bring the Creation Kit to the front
+and move the cursor. **Only run them when nobody is using the PC.** Every edit is checked before it is applied:
+`ref` opens the object's Reference dialog by clicking it in the render window and refuses to type anything unless
+the dialog shows the requested editor ID.
+
+Things the Creation Kit does that the tools work around (details in `ack/ck/session.py`):
+- It is not DPI-aware: coordinates posted to it are scaled by the screen's DPI factor.
+- Its render window only draws while visible, so screenshots copy the screen.
+- **Set as Active File** toggles, and File > Data opens hidden and remembers the last session's ticks.
+- New forms get IDs from its own counter, which can run past an ESL's 0xFFF; run `compact` after creating forms.
+- Saving with extra plugins loaded can add their masters to the active file (through the navmesh index, NAVI).
 
 ## How unattended xEdit runs stay safe
 
@@ -62,3 +92,4 @@ To teach it a new dialog: run once, look at the captured screenshot, then add a 
 - Record editing helpers on top of `ack.plugin` (copy/create records, FormID allocation, master handling),
   so common edits no longer need xEdit at all; xEdit stays as the independent validator.
 - An MCP server exposing these tools to any agent.
+- `ack.ck`: placing new objects from the Object Window by drag and drop, and gizmo moves in the render window.
