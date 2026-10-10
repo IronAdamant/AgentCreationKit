@@ -23,6 +23,8 @@
     list.add     | EDID | LIST_PATH | TEMPLATE_INDEX | Field=Value ; Field=Value
                    append a copy of entry #TEMPLATE_INDEX of a list (e.g. VMAD\Script Fragments\Fragments) and
                    set fields on the copy (values may be @EDID)
+    rec.delete   | EDID                                               delete a record from the target. Only for
+                   records nothing references - check that first (xEdit's own reference info may not be built yet)
     field.set    | EDID | PATH | VALUE                                set any field by xEdit path, e.g.
                    Effects\[1]\EFID or Magic Effect Data\DATA\Perk to Apply. VALUE @SOME_EDID is
                    replaced by that record's FormID
@@ -340,6 +342,11 @@ begin
       before := before + Trim(Copy(d, 1, i - 1)) + '=' + GetElementEditValues(p, Trim(Copy(d, 1, i - 1))) + '  ';
     end;
     Ok(line, 'added entry to ' + a + ' (now ' + IntToStr(ElementCount(effs)) + '): ' + before);
+  end
+  else if op = 'rec.delete' then begin
+    before := Name(rec);
+    Remove(rec);
+    Ok(line, 'deleted ' + before);
   end
   else if op = 'field.set' then begin
     p := ElementByPath(rec, a);
