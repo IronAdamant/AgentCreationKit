@@ -23,6 +23,8 @@
     list.add     | EDID | LIST_PATH | TEMPLATE_INDEX | Field=Value ; Field=Value
                    append a copy of entry #TEMPLATE_INDEX of a list (e.g. VMAD\Script Fragments\Fragments) and
                    set fields on the copy (values may be @EDID)
+    field.remove | EDID | PARENT_PATH | CHILD                          remove an optional subrecord, e.g.
+                   Model | MODT (a model's texture-hash data, stale once the model path changes)
     rec.delete   | EDID                                               delete a record from the target. Only for
                    records nothing references - check that first (xEdit's own reference info may not be built yet)
     field.set    | EDID | PATH | VALUE                                set any field by xEdit path, e.g.
@@ -343,6 +345,19 @@ begin
     end;
     Ok(line, 'added entry to ' + a + ' (now ' + IntToStr(ElementCount(effs)) + '): ' + before);
   end
+  else if op = 'field.remove' then begin
+    p := ElementByPath(rec, a);
+    if not Assigned(p) then begin
+      Fail(line, 'parent not found: ' + a);
+      Exit;
+    end;
+    if not Assigned(ElementByPath(p, b)) then begin
+      Ok(line, 'already absent: ' + a + ' ' + b);
+      Exit;
+    end;
+    RemoveElement(p, b);
+    Ok(line, 'removed ' + a + ' ' + b);
+  end
   else if op = 'rec.delete' then begin
     before := Name(rec);
     Remove(rec);
@@ -382,6 +397,10 @@ begin
       f := FileByIndex(i);
   if not Assigned(f) then
     log.Add('ERROR  target plugin not loaded')
+  else if not FileExists(EditsFile) then begin
+    log.Add('ERROR  edits file not found: ' + EditsFile);
+    Inc(nErr);
+  end
   else begin
     lines.LoadFromFile(EditsFile);
     for i := 0 to lines.Count - 1 do begin
