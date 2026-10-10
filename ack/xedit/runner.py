@@ -14,6 +14,7 @@ out, xEdit is terminated (nothing saved), and the captured dialog is in the repo
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -60,7 +61,7 @@ def _plugin_list(masters: list[str], target: str) -> str:
 
 
 def run(script: str, target: str, *, save: bool = False, masters: list[str] | None = None,
-        timeout: float = 900, cfg: cfg_mod.Config | None = None) -> RunReport:
+        timeout: float = 900, params: dict[str, str] | None = None, cfg: cfg_mod.Config | None = None) -> RunReport:
     cfg = cfg or cfg_mod.load()
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     # A bundled script name, or a path to a project's own .pas template (e.g. kept in the mod's repo).
@@ -75,6 +76,13 @@ def run(script: str, target: str, *, save: bool = False, masters: list[str] | No
     if "'" in target or "'" in out_str:
         raise ValueError('Paths containing quotes are not supported in Pascal string constants')
     rendered = template.replace('{{TARGET}}', target).replace('{{OUT}}', out_str)
+    for key, value in (params or {}).items():
+        if "'" in value:
+            raise ValueError(f'parameter {key} contains a quote')
+        rendered = rendered.replace('{{' + key + '}}', value)
+    missing = sorted(set(re.findall(r'\{\{(\w+)\}\}', rendered)))
+    if missing:
+        raise ValueError(f'script {script_path.name} needs --param for: {", ".join(missing)}')
     script_name = f'ACK_{script}.pas'
     (cfg.xedit_scripts_dir / script_name).write_text(rendered, encoding='utf8')
 

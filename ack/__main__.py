@@ -15,7 +15,8 @@ from pathlib import Path
 
 def cmd_xedit_run(a):
     from .xedit.runner import run
-    report = run(a.script, a.plugin, save=a.save, timeout=a.timeout)
+    params = dict(kv.split('=', 1) for kv in a.param)
+    report = run(a.script, a.plugin, save=a.save, timeout=a.timeout, params=params)
     print(report.summary())
     return 0 if report.outcome == 'done' and not report.unknown_dialogs else 1
 
@@ -59,6 +60,8 @@ def main(argv=None):
     r.add_argument('plugin', help='plugin file name as it appears in the Data folder')
     r.add_argument('--save', action='store_true', help='let xEdit save changed plugins when it closes (without this flag nothing is ever written)')
     r.add_argument('--timeout', type=float, default=900)
+    r.add_argument('--param', action='append', default=[], metavar='KEY=VALUE',
+                   help='fill a {{KEY}} placeholder in the script, e.g. EDITS=path/to/edits.txt')
     r.set_defaults(func=cmd_xedit_run)
     x.add_parser('scripts', help='list available scripts').set_defaults(func=cmd_xedit_scripts)
 
