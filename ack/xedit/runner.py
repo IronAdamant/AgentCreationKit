@@ -114,6 +114,11 @@ def run(script: str, target: str, *, save: bool = False, masters: list[str] | No
                 close_sent = True
             if time.time() - t0 > timeout:
                 report.outcome = 'timeout'
+                # Script errors appear only in xEdit's Messages pane, not as dialogs: keep a picture of it.
+                if watcher.main_hwnd:
+                    shot = win32.screenshot_bmp(watcher.main_hwnd)
+                    if shot:
+                        (out / 'timeout_main_window.bmp').write_bytes(shot)
                 break
             time.sleep(0.4)
     finally:
