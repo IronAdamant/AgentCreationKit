@@ -3,11 +3,13 @@
 1. Render a script template (target plugin + output folder) into xEdit's Edit Scripts folder.
 2. Write a plugin list so xEdit loads exactly the target and its masters (-P:), never the user's plugins.txt.
 3. Launch xEdit with -autoload -script -autoexit and watch its windows with an allowlist DialogWatcher.
-4. When the script writes DONE.txt, close xEdit; in save runs, the allowlist handles the save prompt.
+4. When the script writes DONE.txt: save runs close xEdit normally, which makes it save changed plugins
+   (in script mode it does so without asking, keeping a copy in Data/FO4Edit Backups); read-only runs
+   terminate it, which can never write anything.
 5. Return a report: outcome, dialogs acted on, unknown dialogs captured (with screenshots), output files.
 
 A run never clicks anything that isn't in rules.json. If an unknown dialog blocks progress, the run times
-out, xEdit is terminated (unsaved), and the captured dialog is in the report for review.
+out, xEdit is terminated (nothing saved), and the captured dialog is in the report for review.
 """
 from __future__ import annotations
 
@@ -92,10 +94,12 @@ def run(script: str, target: str, *, save: bool = False, masters: list[str] | No
             watcher.poll()
             if done_file.exists() and not close_sent:
                 time.sleep(1.0)  # let xEdit finish writing / return from the script
-                if watcher.main_hwnd:
-                    win32.close(watcher.main_hwnd)  # graceful: lets the allowlist answer any save prompt
-                elif not save:
-                    proc.kill()  # read-only run: nothing to save, main window not identified
+                if not save:
+                    # xEdit in script mode saves changed plugins automatically on a normal close, with no
+                    # prompt. Terminating is the only way to guarantee a read-only run writes nothing.
+                    proc.kill()
+                elif watcher.main_hwnd:
+                    win32.close(watcher.main_hwnd)  # normal close: xEdit saves the changed plugins
                 close_sent = True
             if time.time() - t0 > timeout:
                 report.outcome = 'timeout'

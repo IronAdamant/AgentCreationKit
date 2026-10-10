@@ -43,14 +43,18 @@ xEdit shows dialogs (startup notices, "save changed files?") that normally need 
 - **Unknown dialogs are never clicked.** The watcher records their title, controls and a screenshot to the run
   folder (`unknown_*.json` / `.bmp`) and leaves them alone. If one blocks the run, it times out and xEdit is
   terminated without saving.
-- Rules can be limited to editing runs (`"when": "save"`), so a read-only run can never confirm a save.
+- **Saving is decided by the run, not by a dialog.** In script mode xEdit saves changed plugins automatically
+  when it closes normally, without asking (it keeps the previous version in `Data/FO4Edit Backups`). So `--save`
+  runs close xEdit normally, and read-only runs terminate it once the script is done, which can never write
+  anything.
+- Rules can still be limited to editing runs (`"when": "save"`) for any prompt that only makes sense there.
 - Buttons are pressed with Windows messages, not the mouse: it works in the background and never touches
   other windows.
 
-To teach it a new dialog: run once, look at the captured screenshot, then add a rule such as
+To teach it a new dialog: run once, look at the captured screenshot, then add a rule to `rules.json`, e.g.
 
 ```json
-{"name": "Save prompt", "title": "Save changed files.*", "buttons": ["OK"], "action": "click:OK", "when": "save"}
+{"name": "Module Selection", "title": "Module Selection", "cls": "TfrmModuleSelect", "buttons": ["OK", "Load"], "action": "click:OK"}
 ```
 
 ## Roadmap
