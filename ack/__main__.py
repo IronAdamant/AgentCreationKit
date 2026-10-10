@@ -55,9 +55,9 @@ def main(argv=None):
 
     x = sub.add_parser('xedit', help='run FO4Edit/xEdit scripts unattended').add_subparsers(dest='cmd', required=True)
     r = x.add_parser('run', help='run a script from ack/xedit/scripts against a plugin')
-    r.add_argument('script')
+    r.add_argument('script', help='bundled script name, or path to a .pas template using {{TARGET}} and {{OUT}}')
     r.add_argument('plugin', help='plugin file name as it appears in the Data folder')
-    r.add_argument('--save', action='store_true', help='allow saving changes (only allowlisted save prompts are answered)')
+    r.add_argument('--save', action='store_true', help='let xEdit save changed plugins when it closes (without this flag nothing is ever written)')
     r.add_argument('--timeout', type=float, default=900)
     r.set_defaults(func=cmd_xedit_run)
     x.add_parser('scripts', help='list available scripts').set_defaults(func=cmd_xedit_scripts)

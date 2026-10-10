@@ -63,12 +63,15 @@ def run(script: str, target: str, *, save: bool = False, masters: list[str] | No
         timeout: float = 900, cfg: cfg_mod.Config | None = None) -> RunReport:
     cfg = cfg or cfg_mod.load()
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    # A bundled script name, or a path to a project's own .pas template (e.g. kept in the mod's repo).
+    script_path = Path(script) if script.lower().endswith('.pas') else SCRIPTS / f'{script}.pas'
+    script = script_path.stem
     out = (cfg.work_dir / f'{stamp}-{script}').resolve()
     out.mkdir(parents=True, exist_ok=True)
     out_str = str(out) + '\\'
 
     # 1. script
-    template = (SCRIPTS / f'{script}.pas').read_text(encoding='utf8')
+    template = script_path.read_text(encoding='utf8')
     if "'" in target or "'" in out_str:
         raise ValueError('Paths containing quotes are not supported in Pascal string constants')
     rendered = template.replace('{{TARGET}}', target).replace('{{OUT}}', out_str)
