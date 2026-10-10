@@ -3,9 +3,31 @@
   "rules": [
     {
       "name": "xEdit main window",
-      "title": "(FO4|SSE|TES5|FNV|FO3|SF1|TES4)Edit.*",
+      "title": "(FO4|SSE|TES5|FNV|FO3|SF1|TES4)(Edit|Script).*",
       "cls": "TfrmMain",
       "action": "main"
+    },
+    {
+      "name": "xEdit main window while a script runs (title shows progress; never press its Cancel)",
+      "title": "\\[Applying script .*\\].*",
+      "cls": "TfrmMain",
+      "action": "main"
+    },
+    {
+      "name": "Delphi application window (hidden owner of all forms)",
+      "title": "",
+      "cls": "TApplication",
+      "action": "ignore"
+    },
+    {
+      "name": "Module Selection: confirm the runner-generated plugin list",
+      "title": "Module Selection",
+      "cls": "TfrmModuleSelect",
+      "buttons": [
+        "OK",
+        "Load"
+      ],
+      "action": "click:OK"
     }
   ]
 }
