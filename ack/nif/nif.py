@@ -46,15 +46,21 @@ class Nif:
             p += s
 
     def replace_sized_string(self, old, new):
-        """Replace every length-prefixed (uint32) occurrence of `old` inside blocks. Returns count."""
+        """Replace every length-prefixed (uint32) occurrence of `old` inside blocks. Returns count.
+
+        Matching ignores case: game paths are case-insensitive and vanilla models mix
+        'textures\\Effects\\...' with 'textures\\effects\\...'.
+        """
         old_b, new_b = old.encode('latin1'), new.encode('latin1')
+        old_l = old_b.lower()
         count = 0
         for i, typ, start, end in reversed(list(self.block_ranges())):
             block = bytes(self.data[start:end])
+            block_l = block.lower()
             j = 0
             pieces, last = [], 0
             while True:
-                k = block.find(old_b, j)
+                k = block_l.find(old_l, j)
                 if k < 0:
                     break
                 if k >= 4 and struct.unpack_from('<I', block, k - 4)[0] == len(old_b):
