@@ -1,0 +1,5 @@
+# Personal notes and local paths - never committed
+private/
+config.local.json
+__pycache__/
+*.pyc

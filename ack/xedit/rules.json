@@ -1,0 +1,11 @@
+{
+  "_comment": "Allowlist of xEdit windows the watcher may act on. Add a rule only after reviewing a captured dialog (see the run log's unknown_*.json/.bmp). Anything not listed here is captured and left alone.",
+  "rules": [
+    {
+      "name": "xEdit main window",
+      "title": "(FO4|SSE|TES5|FNV|FO3|SF1|TES4)Edit.*",
+      "cls": "TfrmMain",
+      "action": "main"
+    }
+  ]
+}
