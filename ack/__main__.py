@@ -129,6 +129,15 @@ def cmd_ck(a):
     return 0
 
 
+def cmd_papyrus_log(a):
+    from ack.game import papyrus_log
+    if a.state:
+        papyrus_log.set_logging(a.state == 'on')
+    print(f'Papyrus logging is {"on" if papyrus_log.is_on() else "off"} ({papyrus_log.INI})')
+    print(f'logs: {papyrus_log.LOGS}')
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='ack', description='AgentCreationKit: tools for AI agents working on Bethesda mods')
     sub = ap.add_subparsers(dest='area', required=True)
@@ -197,6 +206,10 @@ def main(argv=None):
     k.add_parser('compact', help='Compact Active File Form IDs (keeps a CK-edited ESL inside its ID range)')
     for p_ in k.choices.values():
         p_.set_defaults(func=cmd_ck)
+
+    pl = sub.add_parser('papyrus-log', help="switch the game's Papyrus script log on/off (Fallout4Custom.ini)")
+    pl.add_argument('state', nargs='?', choices=['on', 'off'], help='omit to show the current state')
+    pl.set_defaults(func=cmd_papyrus_log)
 
     a = ap.parse_args(argv)
     return a.func(a)
