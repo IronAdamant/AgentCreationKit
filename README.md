@@ -15,7 +15,7 @@ Python 3.10+, Windows, no third-party dependencies.
 | `ack.plugin` | Read and write plugin files (`.esp/.esm/.esl`) directly. Lossless: unmodified data is written back byte-for-byte (verified on `Fallout4.esm`, 1.5M records). |
 | `ack.archive` | Extract files from BA2 archives (general and texture archives; textures come out as `.dds`). |
 | `ack.nif` | Inspect NIF models and patch length-prefixed strings (e.g. texture paths) while keeping the block table valid. |
-| `ack.ck` | Drive a running Creation Kit like a level designer: load plugins, open cells, select objects, set exact position/rotation/scale, move the camera (zoom, pan, orbit), screenshot the render window, generate navmesh, compact form IDs, save. |
+| `ack.ck` | Drive a running Creation Kit like a level designer: load plugins, open cells, select objects, set exact position/rotation/scale, move the camera (zoom, pan, orbit, or look from a bearing/elevation/distance), screenshot the render window, generate navmesh, compact form IDs, save. |
 
 ## Setup
 
@@ -44,6 +44,7 @@ python -m ack ck ref MyChestRef                           # read position / rota
 python -m ack ck ref MyChestRef --rot _ _ 180             # set them ('_' keeps an axis)
 python -m ack ck select MyChestRef                        # select it and fly the camera there
 python -m ack ck camera zoom -40 | pan DX DY | orbit DX DY | top | bright
+python -m ack ck camera look 135 20 900                  # view the selection from bearing 135 (SE), 20 deg up, 900 away
 python -m ack ck shot out.png                             # screenshot of the render window
 python -m ack ck navmesh                                  # Recast navmesh for the cell, then finalize
 python -m ack ck compact                                  # Compact Active File Form IDs
@@ -62,6 +63,12 @@ Things the Creation Kit does that the tools work around (details in `ack/ck/sess
 - **Set as Active File** toggles, and File > Data opens hidden and remembers the last session's ticks.
 - New forms get IDs from its own counter, which can run past an ESL's 0xFFF; run `compact` after creating forms.
 - Saving with extra plugins loaded can add their masters to the active file (through the navmesh index, NAVI).
+- The camera has no numeric controls. `camera look` orbits and zooms in a closed loop, reading the camera position
+  back from the status bar: it finds the orbit pivot from a few probing moves, then corrects until the bearing,
+  elevation and distance match. It starts from the top view and tilts down the south side, because orbiting over
+  a pole leaves the picture upside down.
+- Recast navmesh generation works on the selection when there is one (and fails with "No Triangles Generated" for
+  a small object): clear the selection first to cover the whole cell.
 
 ## How unattended xEdit runs stay safe
 

@@ -40,6 +40,17 @@ begin
       end;
     end;
   end;
+  // placed references live inside cell groups, out of MainRecordByEditorID's reach: scan every record
+  for i := FileCount - 1 downto 0 do begin
+    f := FileByIndex(i);
+    for j := 0 to RecordCount(f) - 1 do begin
+      g := RecordByIndex(f, j);
+      if SameText(EditorID(g), edid) then begin
+        Result := g;
+        Exit;
+      end;
+    end;
+  end;
 end;
 
 function Initialize: integer;

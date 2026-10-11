@@ -108,7 +108,10 @@ def cmd_ck(a):
             ck.orbit(float(a.values[0]), float(a.values[1]))
         elif a.action == 'pan':
             ck.pan(float(a.values[0]), float(a.values[1]))
-        print(ck.status().camera)
+        elif a.action == 'look':
+            pivot = ck.look(*map(float, a.values[:3]))
+            print('pivot', tuple(round(v) for v in pivot))
+        print(ck.camera())
     elif c == 'save':
         for title, texts in ck.save():
             print(f'dialog {title!r}: {" | ".join(texts)}')
@@ -186,8 +189,8 @@ def main(argv=None):
     m_ = k.add_parser('menu', help="run a menu command, e.g. 'View/Top' or 'Finalize Cell NavMeshes'")
     m_.add_argument('path')
     m_.add_argument('--list', action='store_true', help='also print every menu path')
-    ca = k.add_parser('camera', help='top | bright | zoom N (positive = in) | pan DX DY | orbit DX DY (pixels; Shift+mouse around the selection)')
-    ca.add_argument('action', choices=['top', 'bright', 'zoom', 'pan', 'orbit'])
+    ca = k.add_parser('camera', help='top | bright | zoom N (positive = in) | pan DX DY | orbit DX DY (pixels; Shift+mouse around the selection) | look YAW PITCH [DISTANCE] (degrees: bearing from the selection, 0 = north; elevation, 90 = overhead)')
+    ca.add_argument('action', choices=['top', 'bright', 'zoom', 'pan', 'orbit', 'look'])
     ca.add_argument('values', nargs='*')
     k.add_parser('save', help='File > Save')
     k.add_parser('navmesh', help='Recast navmesh for the loaded cell, then finalize')

@@ -37,7 +37,7 @@ class RunReport:
     target: str
     save: bool
     out_dir: str
-    outcome: str = 'pending'        # done | script_error | timeout | crashed
+    outcome: str = 'pending'        # done | script_error | save_error | timeout | crashed
     seconds: float = 0.0
     exit_code: int | None = None
     events: list = field(default_factory=list)
@@ -51,7 +51,7 @@ class RunReport:
         if self.unknown_dialogs:
             lines.append(f'  {len(self.unknown_dialogs)} unknown dialog(s) captured in {self.out_dir} - review and add rules')
         lines.append(f'  outputs: {", ".join(self.outputs) or "none"}')
-        if self.outcome == 'script_error':
+        if self.outcome in ('script_error', 'save_error'):
             log = Path(self.out_dir) / 'xedit_log.txt'
             lines += ['  xEdit log (end):'] + ['    ' + l for l in log.read_text(encoding='utf8').splitlines()[-4:]]
         return '\n'.join(lines)
@@ -117,11 +117,14 @@ def run(script: str, target: str, *, save: bool = False, masters: list[str] | No
             watcher.poll()
             # A script error only shows up in xEdit's Messages pane: read it so the run fails at once
             # instead of waiting for the timeout.
-            if watcher.main_hwnd and not done_file.exists() and time.time() > next_log_check:
+            # A plugin that cannot be written shows up there too, after the close, and xEdit then just sits.
+            if watcher.main_hwnd and (not done_file.exists() or close_sent) and time.time() > next_log_check:
                 next_log_check = time.time() + 2.0
                 log = messages_text(watcher.main_hwnd)
-                if 'Aborted: Applying script' in log:
-                    report.outcome = 'script_error'
+                failure = ('script_error' if 'Aborted: Applying script' in log
+                           else 'save_error' if 'Error saving' in log else None)
+                if failure:
+                    report.outcome = failure
                     (out / 'xedit_log.txt').write_text('\n'.join(log.splitlines()[-40:]), encoding='utf8')
                     break
             if done_file.exists() and not close_sent:

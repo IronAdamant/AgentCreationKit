@@ -19,6 +19,7 @@ Findings this is built on (FO4 CK, Windows 11, 120 dpi):
 from __future__ import annotations
 
 import ctypes
+import math
 import re
 import time
 from ctypes import wintypes as W
@@ -597,6 +598,90 @@ class CreationKit:
         inputs.key(inputs.VK['shift'], False)
         self._nudge()
 
+    def camera(self) -> tuple[float, float, float]:
+        """Camera position from the status bar (fresh: nudges the cursor first)."""
+        self._nudge()
+        cam = self.status().camera
+        if cam is None:
+            raise CKError('no camera position in the status bar (is a cell loaded?)')
+        return cam
+
+    def look(self, yaw: float, pitch: float, distance: float | None = None, tolerance: float = 4.0,
+             attempts: int = 12) -> tuple[float, float, float]:
+        """Put the camera at compass bearing `yaw` (degrees; 0 = north of the selection, 90 = east) and elevation
+        `pitch` (degrees above the selection; 90 = overhead), `distance` units from the orbit pivot, looking at
+        the selection. Select something first. Closed loop: the pivot is found from a few probing orbits (the
+        camera stays on a sphere around it), then orbits and wheel clicks are corrected until the status bar's
+        camera position agrees. Returns the pivot."""
+        self.focus()
+        pitch = max(-80.0, min(80.0, pitch))  # stay clear of the poles
+        # Start from the top view, then tilt with the mouse moving up: that swings the camera down the south side
+        # and keeps it upright (tilting the other way over the pole turns the picture upside down). View/Top puts
+        # the camera off the orbit sphere, so the probes start after the first tilt.
+        self.top_view()
+        pivot = None
+        for size in (40, 80, 120):
+            self.orbit(0, -size, steps=20)
+            probes = [self.camera()]
+            for dx, dy in ((size, 0), (size, 0), (0, -size)):
+                self.orbit(dx, dy, steps=20)
+                probes.append(self.camera())
+            try:
+                guess = _sphere_centre(probes)
+            except CKError:
+                continue
+            radii = [math.dist(p, guess) for p in probes]
+            # a good fit has every probe at the same distance, and the pivot no further than the camera can be
+            if max(radii) - min(radii) < 0.05 * max(radii) + 10 and max(radii) < 20000:
+                pivot = guess
+                break
+        if pivot is None:
+            raise CKError('could not find the orbit pivot (is something selected?)')
+
+        def angles(c):
+            v = [c[i] - pivot[i] for i in range(3)]
+            flat = math.hypot(v[0], v[1])
+            return (math.degrees(math.atan2(v[0], v[1])) % 360, math.degrees(math.atan2(v[2], flat)),
+                    math.hypot(flat, v[2]))
+
+        def turn(a, b):
+            return (b - a + 180) % 360 - 180
+
+        # signed pixels per degree, measured from the probes and refined after every move
+        a = [angles(c) for c in probes]
+        kx = size / turn(a[1][0], a[2][0]) if abs(turn(a[1][0], a[2][0])) > 1 else 2.6
+        ky = -size / (a[3][1] - a[2][1]) if abs(a[3][1] - a[2][1]) > 1 else 2.3
+        cam = probes[-1]
+        for _ in range(attempts):
+            y0, p0, _d = angles(cam)
+            ey, ep = turn(y0, yaw), pitch - p0
+            if abs(ey) <= tolerance and abs(ep) <= tolerance:
+                break
+            dx = max(-400.0, min(400.0, ey * kx))
+            dy = max(-400.0, min(400.0, ep * ky))
+            self.orbit(dx, dy, steps=max(10, int(max(abs(dx), abs(dy)) / 5)))
+            cam = self.camera()
+            y1, p1, _d = angles(cam)
+            if abs(dx) > 20 and abs(turn(y0, y1)) > 3 and abs(dx / turn(y0, y1)) < 15:
+                kx = dx / turn(y0, y1)
+            if abs(dy) > 20 and abs(p1 - p0) > 3 and abs(dy / (p1 - p0)) < 15:
+                ky = dy / (p1 - p0)
+        if distance:
+            per_click = None
+            for _ in range(8):
+                d0 = angles(cam)[2]
+                if abs(d0 - distance) <= max(20.0, distance * 0.05):
+                    break
+                clicks = 1 if per_click is None else int(round((d0 - distance) / per_click)) or (1 if d0 > distance else -1)
+                self.zoom(max(-30, min(30, clicks)))
+                cam = self.camera()
+                moved = d0 - angles(cam)[2]
+                if per_click is None and abs(moved) > 1:
+                    per_click = moved / clicks
+                elif per_click is None:
+                    break
+        return pivot
+
     def _nudge(self) -> None:
         """The status bar's camera position only refreshes when the cursor moves over the render window."""
         time.sleep(0.3)
@@ -631,18 +716,47 @@ class CreationKit:
         return message
 
     # ---------------------------------------------------------------- navmesh
-    def generate_navmesh(self) -> list:
-        """Recast navmesh for the loaded cell with the default settings, then Finalize Cell NavMeshes."""
+    def generate_navmesh(self, timeout: float = 2400) -> list:
+        """Recast navmesh for the loaded cell with the default settings, then Finalize Cell NavMeshes. Recast only
+        covers the selection when something is selected: clear it first for the whole cell. A big cell (over a
+        thousand objects) takes several minutes."""
+        if self.status().selection not in ('', 'Camera'):
+            raise CKError(f'{self.status().selection} is selected: Recast would only cover it. Clear the selection.')
         self.menu('NavMesh/Generation/Recast-Based Generation')
         dlg = self.wait_dialog('Recast Navmesh Generation')
         self.press(dlg, 'OK')
-        events = self.wait_idle(600, settle=2)
+        events = self.wait_idle(timeout, settle=3)
         self.menu('NavMesh/Finalize Cell NavMeshes')
-        events += self.wait_idle(300, settle=2)
+        events += self.wait_idle(timeout / 2, settle=3)
         nav = self.window('Navmesh', '#32770')
         if nav:
             win32.close(nav)  # its toolbar blocks saving
         return events
+
+
+def _sphere_centre(points) -> tuple[float, float, float]:
+    """Centre of the sphere through four points: |p - c|^2 is the same for all, so (p_i - p_0) . c * 2 =
+    |p_i|^2 - |p_0|^2 for i = 1..3, solved by Cramer's rule."""
+    p0 = points[0]
+    rows, rhs = [], []
+    for p in points[1:4]:
+        rows.append([2 * (p[i] - p0[i]) for i in range(3)])
+        rhs.append(sum(p[i] ** 2 - p0[i] ** 2 for i in range(3)))
+
+    def det(m):
+        return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+
+    d = det(rows)
+    if abs(d) < 1e-6:
+        raise CKError('camera probes were coplanar; cannot find the orbit pivot')
+    out = []
+    for col in range(3):
+        m = [r[:] for r in rows]
+        for i in range(3):
+            m[i][col] = rhs[i]
+        out.append(det(m) / d)
+    return tuple(out)
 
 
 def _top_windows() -> list[int]:
