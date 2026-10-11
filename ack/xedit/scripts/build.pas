@@ -844,7 +844,9 @@ begin
     end;
   end;
   for i := 0 to FileCount - 1 do
-    if built.IndexOf(GetFileName(FileByIndex(i))) >= 0 then begin
+    // ESL range fixes only for light plugins (header flag 0x200); a regular .esp uses the full 24-bit range
+    if (built.IndexOf(GetFileName(FileByIndex(i))) >= 0) and
+       ((GetElementNativeValues(ElementByIndex(FileByIndex(i), 0), 'Record Header\Record Flags') and $200) <> 0) then begin
       FixOutOfRangeIDs(FileByIndex(i));
       FixNextObjectID(FileByIndex(i));
     end;
