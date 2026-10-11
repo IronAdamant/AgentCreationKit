@@ -213,10 +213,12 @@ class CreationKit:
             time.sleep(0.25)
         raise CKError(f'no {title!r} dialog after {timeout}s')
 
-    def press(self, dialog: int, button_text: str) -> None:
+    def press(self, dialog: int, button_text: str, post: bool = False) -> None:
+        """Click a dialog button. post: don't wait for the click to be handled - for a button that opens a modal
+        prompt (a sent click only returns once that prompt is answered, so nothing could answer it)."""
         for c in win32.child_controls(dialog):
             if c.text.replace('&', '') == button_text:
-                user32.SendMessageW(c.hwnd, BM_CLICK, 0, 0)
+                (user32.PostMessageW if post else user32.SendMessageW)(c.hwnd, BM_CLICK, 0, 0)
                 return
         raise CKError(f'no {button_text!r} button')
 
@@ -321,12 +323,15 @@ class CreationKit:
             if self.remote.lv_text(lv, row, 1) != 'Active File':
                 self.press(dlg, 'Cancel')
                 raise CKError(f'could not make {active} the active file')
-        self.press(dlg, 'OK')
+        self.press(dlg, 'OK', post=True)  # OK may open the "no active file" prompt: answered in wait_idle below
         time.sleep(2)
 
         def answer(hwnd, title, texts):
             if title == 'IMPORTANT WARNING' or 'generated warnings on load' in ' '.join(texts):
                 self.press(hwnd, 'OK')
+                return True
+            if not active and 'not set a file as the active file' in ' '.join(texts):
+                self.press(hwnd, 'Yes')  # loading to look only: nothing can be saved into the plugins
                 return True
             return False
 
