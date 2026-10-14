@@ -27,8 +27,8 @@ def _strip(lines: list[str]) -> list[str]:
 
 
 def ini_path() -> Path:
-    cfg = config.load()
-    return cfg.my_games_dir / cfg.game.custom_ini
+    """The custom ini the game reads: under My Games, or an MO2 profile's own (profile-specific inis)."""
+    return config.load().custom_ini
 
 
 def logs_dir() -> Path:

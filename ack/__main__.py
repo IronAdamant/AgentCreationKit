@@ -1,10 +1,15 @@
 """AgentCreationKit command line.
 
+    python -m ack doctor                  check the setup (start here)
+    python -m ack where <file> ...        where a Data file really is (the MO2 mod it comes from)
     python -m ack xedit run <script> <plugin> [--save] [--timeout S]
     python -m ack xedit scripts
     python -m ack plugin info <path>
     python -m ack plugin check <path> [--masters M ...]
+    python -m ack papyrus compile <source> --out DIR [script ...]
     python -m ack ba2 extract <archive> <pattern>... --out DIR
+    python -m ack ba2 pack <root> <out.ba2> [folder ...] [--textures]
+    python -m ack ba2 info <archive> [--files]
     python -m ack ck <command> ...        drive a running Creation Kit (python -m ack ck -h)
     python -m ack ck run <steps.txt>      several ck commands in one session that always ends closed
 """
@@ -76,11 +81,56 @@ def cmd_plugin_info(a):
 
 
 def _data_path(name: str) -> Path:
-    """A plugin path, or a bare file name in the game's Data folder."""
+    """A plugin path, or a bare file name in the game's Data folder (through MO2's mods when "mo2" is set)."""
     if Path(name).exists():
         return Path(name)
     from . import config
-    return config.load().data_dir / name
+    return config.load().data_path(name)
+
+
+def cmd_doctor(a):
+    from . import doctor
+    return doctor.main()
+
+
+def cmd_where(a):
+    from . import config
+    cfg = config.load()
+    code = 0
+    for name in a.files:
+        if cfg.mo2:
+            found = cfg.mo2.origin(name)
+            print(f'{name}: ' + (f'{found[1]} ({found[0]})' if found else 'not found'))
+        else:
+            path = cfg.data_path(name)
+            print(f'{name}: ' + (str(path) if path.exists() else 'not found'))
+            found = path.exists()
+        code |= not found
+    return code
+
+
+def cmd_papyrus_compile(a):
+    from .papyrus import compile_scripts
+    results = compile_scripts(Path(a.source), Path(a.out), a.scripts or None, a.imports, a.debug, a.f4se)
+    for c in results:
+        print(f'compiled {c.script} -> {c.pex}' if c.pex else f'FAILED {c.script}:\n{c.output}')
+    failed = sum(1 for c in results if not c.pex)
+    print(f'{len(results) - failed} compiled, {failed} failed')
+    return 1 if failed else 0
+
+
+def cmd_ba2_pack(a):
+    from .archive.pack import info, pack
+    out = pack(Path(a.root), Path(a.out), a.folders or None, a.textures, a.keep_version)
+    print(out)
+    print(info(out).summary())
+    return 0
+
+
+def cmd_ba2_info(a):
+    from .archive.pack import info
+    print(info(Path(a.archive)).summary(a.files))
+    return 0
 
 
 def cmd_plugin_check(a):
@@ -248,6 +298,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog='ack', description='AgentCreationKit: tools for AI agents working on Bethesda mods')
     sub = ap.add_subparsers(dest='area', required=True)
 
+    sub.add_parser('doctor', help='check the setup: config, game, xEdit, Creation Kit, MO2 (start here)'
+                   ).set_defaults(func=cmd_doctor)
+    w = sub.add_parser('where', help='where a Data file really is (with MO2: the mod it comes from, or overwrite)')
+    w.add_argument('files', nargs='+', help='Data-relative paths, e.g. MyMod.esp or Scripts/MyMod/X.pex')
+    w.set_defaults(func=cmd_where)
+
     x = sub.add_parser('xedit', help='run FO4Edit/xEdit scripts unattended').add_subparsers(dest='cmd', required=True)
     r = x.add_parser('run', help='run a script from ack/xedit/scripts against a plugin')
     r.add_argument('script', help='bundled script name, or path to a .pas template using {{TARGET}} and {{OUT}}')
@@ -286,6 +342,33 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument('patterns', nargs='+', help=r'glob(s) on archive paths, e.g. meshes\effects\laser*')
     e.add_argument('--out', required=True)
     e.set_defaults(func=cmd_ba2_extract)
+    bp = b.add_parser('pack', help='make a PC archive with Archive2, stamped so every game version reads it')
+    bp.add_argument('root', help='a folder laid out like Data (Scripts/, Meshes/, Textures/ ...)')
+    bp.add_argument('out', help='the archive, e.g. "dist/MyMod - Main.ba2"')
+    bp.add_argument('folders', nargs='*', help='folders of root to pack (default: all but Textures; '
+                                               'with --textures: Textures)')
+    bp.add_argument('--textures', action='store_true', help='a texture (DDS) archive: "MyMod - Textures.ba2"')
+    bp.add_argument('--keep-version', action='store_true', help="leave Archive2's version number (8: next-gen only)")
+    bp.set_defaults(func=cmd_ba2_pack)
+    bi = b.add_parser('info', help='version, kind, file count and texture tile modes (8 = PC layout)')
+    bi.add_argument('archive')
+    bi.add_argument('--files', action='store_true', help='list every file')
+    bi.set_defaults(func=cmd_ba2_info)
+
+    pa = sub.add_parser('papyrus', help="compile Papyrus scripts with the Creation Kit's compiler"
+                        ).add_subparsers(dest='cmd', required=True)
+    pc = pa.add_parser('compile', help='compile scripts against the vanilla sources (never the script extender '
+                                       "'s unless --f4se)")
+    pc.add_argument('source', help='the source root whose subfolders are namespaces (e.g. source/User)')
+    pc.add_argument('scripts', nargs='*', help='script names with ":" namespaces, e.g. MyMod:MyScript '
+                                               '(default: every .psc under source)')
+    pc.add_argument('--out', required=True, help='where the .pex files go, e.g. data/Scripts')
+    pc.add_argument('--import', dest='imports', action='append', default=[], metavar='DIR',
+                    help='more source folders to compile against (before the vanilla ones)')
+    pc.add_argument('--debug', action='store_true', help='keep Debug.Trace calls (release builds strip them)')
+    pc.add_argument('--f4se', action='store_true', help="compile against F4SE's script sources (the mod will "
+                                                        'need F4SE)')
+    pc.set_defaults(func=cmd_papyrus_compile)
 
     k = sub.add_parser('ck', help='drive a running Creation Kit').add_subparsers(dest='cmd', required=True)
     k.add_parser('launch', help='start the Creation Kit (if needed) and wait until it is ready')

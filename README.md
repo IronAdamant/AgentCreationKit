@@ -5,6 +5,9 @@ clicking through the Creation Kit or FO4Edit. Built while restoring a real Fallo
 ([Custom Legendary Modifications](https://www.nexusmods.com/fallout4/mods/5565)), so every feature exists
 because a real modding task needed it.
 
+**Agents: read [AGENTS.md](AGENTS.md) first** (Claude Code loads it through CLAUDE.md): setup, the safety rules,
+and which command does what.
+
 Python 3.10+, Windows, no third-party dependencies. Built and verified on Fallout 4; what differs between games
 lives in one place (`ack/games.py`), so other Creation Engine games are a profile away (see
 [Other games](#other-games)).
@@ -17,16 +20,22 @@ lives in one place (`ack/games.py`), so other Creation Engine games are a profil
 | `ack.plugin` | Read and write plugin files (`.esp/.esm/.esl`) directly. Lossless: unmodified data is written back byte-for-byte (verified on `Fallout4.esm`, 1.5M records). |
 | `ack.plugin.check` | Check a plugin for what Creation Kit saves break: masters added since before, navmeshes missing from the navmesh index (NAVI), light-plugin (ESL) IDs out of range. Reads only the plugin. |
 | `ack.games` | Per-game facts: official masters, xEdit and CK names, My Games folder, light-plugin ID ranges. |
-| `ack.archive` | Extract files from BA2 archives (general and texture archives; textures come out as `.dds`). |
+| `ack.archive` | Extract files from BA2 archives (general and texture archives; textures come out as `.dds`); pack a mod's archives with Archive2, stamped so every PC game version reads them; show an archive's version, files and texture tile modes. |
+| `ack.papyrus` | Compile a mod's Papyrus scripts with the Creation Kit's compiler, against the vanilla sources only (F4SE's only when asked). |
+| `ack.mo2` | Mod Organizer 2: run xEdit and the CK inside MO2's virtual Data folder, and find which mod a file comes from. |
+| `ack.doctor` | Check the setup and say how to fix it; without a config, find the game folders and MO2 instances to fill one in. |
 | `ack.nif` | Inspect NIF models and patch length-prefixed strings (e.g. texture paths) while keeping the block table valid. |
 | `ack.ck` | Drive a running Creation Kit like a level designer: load plugins, open cells, select objects, set exact position/rotation/scale, move the camera (zoom, pan, orbit, or look from a bearing/elevation/distance), screenshot the render window, generate navmesh, compact form IDs, save. |
 
 ## Setup
 
 ```
-copy config.example.json config.local.json   # then set your game, xEdit and work paths
+copy config.example.json config.local.json   # then set your game, xEdit and work paths ("mo2" for Mod Organizer 2)
+python -m ack doctor                         # checks everything; run it until it says "ready"
 python -m unittest discover -s tests -t .
 ```
+
+Run ack from a clone of this repo: it reads `config.local.json` from the repo root.
 
 ## Usage
 
@@ -38,7 +47,33 @@ python -m ack plugin info "D:/.../Data/MyMod.esp"
 python -m ack plugin check "MyMod.esp" --masters Fallout4.esm DLCCoast.esm   # exit code 1 on any error
 python -m ack navmesh "MyMod.esp" --island y-1536 --covered 1100,1100,2250,1750   # check a generated navmesh
 python -m ack ba2 extract "D:/.../Fallout4 - Meshes.ba2" "meshes\effects\laser*" --out extracted
+python -m ack where "MyMod.esp"                              # the real path (with MO2: the mod it comes from)
+python -m ack papyrus compile source/User --out data/Scripts # every script under source/User; --debug keeps traces
+python -m ack ba2 pack stage "dist/MyMod - Main.ba2"         # stage/ is laid out like Data; all but Textures
+python -m ack ba2 pack stage "dist/MyMod - Textures.ba2" --textures
+python -m ack ba2 info "dist/MyMod - Textures.ba2"           # version, file count, tile modes (8 = PC layout)
 ```
+
+## Mod Organizer 2
+
+MO2 keeps each mod in its own folder and merges them into Data only for the programs it starts, so on their own
+xEdit and the Creation Kit cannot see a plugin installed through MO2. Add the instance to `config.local.json`:
+
+```json
+"mo2": {"exe": "D:/MO2/ModOrganizer.exe", "instance": "Fallout 4", "profile": "Default"}
+```
+
+`instance` is a global instance's name, or the path of an instance folder; `profile` defaults to the instance's
+selected one. ack then starts xEdit and the CK through `ModOrganizer.exe run`, so they see the profile's mods, and
+looks files up the way MO2 does (overwrite, then the enabled mods from the highest priority, then Data), for
+`plugin check`, `where` and the CK's save check. Files the tools create go to MO2's overwrite folder; an xEdit
+save run reports where the plugin is afterwards.
+
+- Verified: read-only xEdit runs on a plugin that exists only in an MO2 mod folder (MO2 2.5.2).
+- Not yet verified: xEdit saving runs and the Creation Kit through MO2 (check where the file lands the first time);
+  portable instances (MO2 is started without `-i`, so it opens the instance it used last).
+- xEdit writes its cache (`FO4Edit Cache`) into overwrite when run through MO2.
+- Vortex deploys mods into the real Data folder, so it needs no setting.
 
 ## Driving the Creation Kit (`ack.ck`)
 
@@ -144,7 +179,7 @@ Everything game-specific is a `Game` profile in `ack/games.py`: official masters
 the CK exe and main window class, the My Games folder and custom ini, light-plugin ID ranges. Choose one with
 `"game"` in `config.local.json` (default `fo4`).
 
-- **Fallout 4**: verified (xEdit, CK, plugin, Papyrus log).
+- **Fallout 4**: verified (xEdit, CK, plugin, Papyrus compile and log, BA2).
 - **Skyrim Special Edition** (`sse`): profile from xEdit's rules, not yet tried. `ack.xedit`, `ack.plugin` and the
   checks should work as they are (same record format); `ack.ck` refuses to run until the CK's window class is set in
   the profile, because each command needs checking against that CK.
@@ -156,6 +191,7 @@ the CK exe and main window class, the My Games folder and custom ini, light-plug
 - Record editing helpers on top of `ack.plugin` (copy/create records, FormID allocation, master handling),
   so common edits no longer need xEdit at all; xEdit stays as the independent validator.
 - An MCP server exposing these tools to any agent.
+- Mod Organizer 2: verify saving xEdit runs and the Creation Kit through MO2.
 - `ack.ck`: gizmo moves in the render window.
 - Verify `ack.ck`'s save-prompt answer on close with unsaved changes (closing has so far always found nothing to
   save; terminating covers it either way).

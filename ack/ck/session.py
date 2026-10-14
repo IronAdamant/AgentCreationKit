@@ -124,19 +124,25 @@ class CreationKit:
     @classmethod
     def launch(cls, timeout: float = 180, cfg: config.Config | None = None) -> 'CreationKit':
         """Start the Creation Kit (if it isn't running), wait for its main window, and record it as ack's session.
-        A CK that was already running is used as it is, but not recorded: close() will not touch it."""
+        A CK that was already running is used as it is, but not recorded: close() will not touch it.
+        With "mo2" in the config it is started through Mod Organizer 2, so it sees the profile's mods."""
         cfg = cfg or config.load()
         wanted = _main_class(cfg)
+        started = False
         if not any(_cls(h) == wanted for h in _top_windows()):
             import subprocess
-            proc = subprocess.Popen([str(cfg.game_dir / cfg.game.ck_exe)], cwd=str(cfg.game_dir))
-            lifecycle.write_state(lifecycle.SessionState(proc.pid), cfg)
+            proc = subprocess.Popen(cfg.command(cfg.game_dir / cfg.game.ck_exe, [], cfg.game_dir), cwd=str(cfg.game_dir))
+            if not cfg.mo2:
+                lifecycle.write_state(lifecycle.SessionState(proc.pid), cfg)
+            started = True
             end = time.time() + timeout
             while not any(_cls(h) == wanted for h in _top_windows()):
                 if time.time() > end:
                     raise CKError('the Creation Kit did not start')
                 time.sleep(1)
         ck = cls(cfg)
+        if started and cfg.mo2:   # the process MO2 started, found by its window (MO2's own process is not the CK)
+            lifecycle.write_state(lifecycle.SessionState(ck.pid), cfg)
         ck.wait_idle(timeout, settle=3)
         return ck
 
@@ -404,25 +410,27 @@ class CreationKit:
         masters from just before."""
         from ..plugin import Plugin
         plugin = plugin or self.active_file()
-        path = self.cfg.data_dir / plugin if plugin else None
-        exists = bool(path and path.exists())
-        stamp = path.stat().st_mtime_ns if exists else None
-        before = Plugin.load(path).masters if exists else None
-        events, message = action()
-        if not path:
+        if not plugin:
+            events, message = action()
             return SaveResult(None, events, None, False, message)
-        written = self._wait_written(path, stamp)
+        path = self.cfg.data_path(plugin)
+        before = Plugin.load(path).masters if path.exists() else None
+        # under MO2 the CK can write the file in its mod folder or in the overwrite folder: watch both
+        targets = {t: t.stat().st_mtime_ns if t.exists() else None for t in self.cfg.write_targets(plugin)}
+        events, message = action()
+        written = self._wait_written(targets)
+        path = written or path
         report = check.check(path, self.cfg.game, expected_masters, before)
         if not written:
             report.add('error', 'the file was not written (nothing changed, or the save failed)')
-        return SaveResult(plugin, events, report, written, message)
+        return SaveResult(plugin, events, report, bool(written), message)
 
     @staticmethod
-    def _wait_written(path: Path, stamp: int | None, timeout: float = 60) -> bool:
-        """Wait for the CK to finish writing the file: changed since stamp, then the same size and time for a
-        moment. The CK looks idle (no dialog, main window enabled) while it saves, and a big plugin takes seconds
-        (Sandbox Room: 4 s), so being idle does not mean the file is written."""
-        def state():
+    def _wait_written(targets: dict[Path, int | None], timeout: float = 60) -> Path | None:
+        """Wait for the CK to finish writing one of the files (path -> its time before): changed since then, then
+        the same size and time for a moment. The CK looks idle (no dialog, main window enabled) while it saves, and
+        a big plugin takes seconds (Sandbox Room: 4 s), so being idle does not mean the file is written."""
+        def state(path):
             try:
                 st = path.stat()
                 return st.st_mtime_ns, st.st_size
@@ -430,14 +438,16 @@ class CreationKit:
                 return None
         end = time.time() + timeout
         while time.time() < end:
-            now = state()
-            if now and now[0] != stamp:
-                time.sleep(1.5)
-                if state() == now:
-                    return True
-                continue
-            time.sleep(0.5)
-        return False
+            for path, stamp in targets.items():
+                now = state(path)
+                if now and now[0] != stamp:
+                    time.sleep(1.5)
+                    if state(path) == now:
+                        return path
+                    break
+            else:
+                time.sleep(0.5)
+        return None
 
     def save(self, plugin: str | None = None, expected_masters: list[str] | None = None) -> SaveResult:
         """File > Save, then check the saved plugin: no master added by the save (the CK adds them through the

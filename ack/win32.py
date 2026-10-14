@@ -215,3 +215,19 @@ def pids_of(exe_name: str) -> list[int]:
     out = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {exe_name}', '/FO', 'CSV', '/NH'],
                          capture_output=True, text=True).stdout
     return [int(row[1]) for row in csv.reader(out.splitlines()) if len(row) > 1 and row[0].lower() == exe_name.lower()]
+
+
+def file_version(path) -> str | None:
+    """An exe's file version ('1.10.984.0'), or None."""
+    version = ctypes.WinDLL('version')
+    size = version.GetFileVersionInfoSizeW(str(path), None)
+    if not size:
+        return None
+    buf = ctypes.create_string_buffer(size)
+    if not version.GetFileVersionInfoW(str(path), 0, size, buf):
+        return None
+    ptr, n = ctypes.c_void_p(), wintypes.UINT()
+    if not version.VerQueryValueW(buf, '\\',ctypes.byref(ptr), ctypes.byref(n)) or n.value < 52:
+        return None
+    ms, ls = struct.unpack_from('<II', ctypes.string_at(ptr.value, 52), 8)
+    return f'{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}'
