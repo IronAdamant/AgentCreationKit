@@ -1,5 +1,9 @@
 # AgentCreationKit
 
+![Claude Code updating a Fallout 4 mod with AgentCreationKit: FO4Edit builds the new room, the Creation Kit generates its navmesh, then the result in game](docs/demo.gif)
+
+*Sandbox Room 1.1, built hands-free: FO4Edit, the Creation Kit, then in game (sped up).*
+
 Let your AI coding agent (Claude Code, Codex, Grok Build, ...) build Bethesda game mods: run xEdit scripts
 unattended, drive the Creation Kit (load, open cells, place and move objects, generate navmesh, save), read and
 write plugins, compile Papyrus and pack BA2 archives, with or without Mod Organizer 2. Built while restoring and
