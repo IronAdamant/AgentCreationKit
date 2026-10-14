@@ -3,6 +3,8 @@ name = "agentcreationkit"
 version = "0.1.0"
 description = "Tools that let AI coding agents work on Bethesda game mods: unattended xEdit runs, plugin read/write, BA2 and NIF helpers"
 requires-python = ">=3.10"
+license = "MIT"
+authors = [{name = "IronAdamant"}]
 dependencies = []
 
 [project.scripts]

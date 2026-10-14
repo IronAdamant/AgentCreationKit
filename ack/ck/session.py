@@ -411,11 +411,33 @@ class CreationKit:
         events, message = action()
         if not path:
             return SaveResult(None, events, None, False, message)
-        written = path.exists() and path.stat().st_mtime_ns != stamp
+        written = self._wait_written(path, stamp)
         report = check.check(path, self.cfg.game, expected_masters, before)
         if not written:
             report.add('error', 'the file was not written (nothing changed, or the save failed)')
         return SaveResult(plugin, events, report, written, message)
+
+    @staticmethod
+    def _wait_written(path: Path, stamp: int | None, timeout: float = 60) -> bool:
+        """Wait for the CK to finish writing the file: changed since stamp, then the same size and time for a
+        moment. The CK looks idle (no dialog, main window enabled) while it saves, and a big plugin takes seconds
+        (Sandbox Room: 4 s), so being idle does not mean the file is written."""
+        def state():
+            try:
+                st = path.stat()
+                return st.st_mtime_ns, st.st_size
+            except OSError:
+                return None
+        end = time.time() + timeout
+        while time.time() < end:
+            now = state()
+            if now and now[0] != stamp:
+                time.sleep(1.5)
+                if state() == now:
+                    return True
+                continue
+            time.sleep(0.5)
+        return False
 
     def save(self, plugin: str | None = None, expected_masters: list[str] | None = None) -> SaveResult:
         """File > Save, then check the saved plugin: no master added by the save (the CK adds them through the

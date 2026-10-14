@@ -36,6 +36,7 @@ python -m ack xedit run check_errors "MyMod.esp"             # read-only run
 python -m ack xedit run clean_masters "MyMod.esp" --save     # editing run
 python -m ack plugin info "D:/.../Data/MyMod.esp"
 python -m ack plugin check "MyMod.esp" --masters Fallout4.esm DLCCoast.esm   # exit code 1 on any error
+python -m ack navmesh "MyMod.esp" --island y-1536 --covered 1100,1100,2250,1750   # check a generated navmesh
 python -m ack ba2 extract "D:/.../Fallout4 - Meshes.ba2" "meshes\effects\laser*" --out extracted
 ```
 
@@ -158,3 +159,7 @@ the CK exe and main window class, the My Games folder and custom ini, light-plug
 - `ack.ck`: gizmo moves in the render window.
 - Verify `ack.ck`'s save-prompt answer on close with unsaved changes (closing has so far always found nothing to
   save; terminating covers it either way).
+
+## License
+
+MIT - see [LICENSE](LICENSE). Copyright (c) 2026 IronAdamant.

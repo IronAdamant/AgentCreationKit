@@ -29,6 +29,31 @@ def cmd_xedit_run(a):
     return 0 if report.outcome == 'done' and not report.unknown_dialogs else 1
 
 
+def cmd_navmesh(a):
+    from .xedit import navmesh
+    from .xedit.runner import run
+    report = run('navmesh_dump', a.plugin, timeout=a.timeout)
+    if report.outcome != 'done':
+        print(report.summary())
+        return 1
+    meshes = navmesh.parse(Path(report.out_dir) / 'navmesh.tsv')
+    print(navmesh.summary(meshes))
+    code = 0
+    for spec in a.island or []:
+        axis, value = spec[0], float(spec[1:])
+        crossing = [m.formid for m in meshes if m.spans(axis, value)]
+        print(f'navmesh crossing {axis} = {value:g}: {", ".join(crossing) or "none"}')
+        code |= bool(crossing)
+    for rect in a.covered or []:
+        x0, y0, x1, y1 = map(float, rect.split(','))
+        hits = {m.formid: m.covers(x0, y0, x1, y1) for m in meshes}
+        hits = {k: v for k, v in hits.items() if v}
+        print(f'covering x {x0:g}..{x1:g} y {y0:g}..{y1:g}: ' +
+              (', '.join(f'{k} ({v} verts)' for k, v in hits.items()) or 'NOTHING'))
+        code |= not hits
+    return code
+
+
 def cmd_xedit_scripts(a):
     from .xedit.runner import SCRIPTS
     for p in sorted(SCRIPTS.glob('*.pas')):
@@ -235,6 +260,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help='also load this plugin after the target (e.g. an add-on that uses it as a master)')
     r.set_defaults(func=cmd_xedit_run)
     x.add_parser('scripts', help='list available scripts').set_defaults(func=cmd_xedit_scripts)
+
+    n = sub.add_parser('navmesh', help="summarise a plugin's navmeshes (bounds, links) through xEdit, read-only")
+    n.add_argument('plugin')
+    n.add_argument('--island', action='append', metavar='AXISVALUE',
+                   help='fail if a navmesh crosses this line, e.g. y-1536 (an area that must stay cut off)')
+    n.add_argument('--covered', action='append', metavar='X0,Y0,X1,Y1',
+                   help='fail if no navmesh has vertices in this rectangle (a room that must be walkable)')
+    n.add_argument('--timeout', type=float, default=600)
+    n.set_defaults(func=cmd_navmesh)
 
     p = sub.add_parser('plugin', help='inspect plugin files').add_subparsers(dest='cmd', required=True)
     i = p.add_parser('info')
