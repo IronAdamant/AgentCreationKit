@@ -115,7 +115,7 @@ def cmd_ck(a, ck=None):
         print(f'title:     {ck.title}\nselection: {st.selection}\ncamera:    {st.camera} in {st.cell}')
     elif c == 'arrange':
         ck.focus()
-        ck.arrange()
+        ck.arrange(a.region)
     elif c == 'shot':
         print(ck.screenshot(a.out, 'main' if a.main else 'render'))
     elif c == 'load':
@@ -261,7 +261,9 @@ def build_parser() -> argparse.ArgumentParser:
                                   'without saving, even if a step fails')
     rn.add_argument('steps')
     k.add_parser('status', help='active file, selection, camera position')
-    k.add_parser('arrange', help='bring to front; big render window, Cell View and Object Window on the left')
+    ar = k.add_parser('arrange', help='bring to front; big render window, Cell View and Object Window on the left')
+    ar.add_argument('--region', nargs=4, type=int, metavar=('X', 'Y', 'W', 'H'),
+                    help='lay out in this screen rectangle (default: config ck_region, else maximised)')
     s_ = k.add_parser('shot', help='screenshot the render window (brings the CK to the front)')
     s_.add_argument('out')
     s_.add_argument('--main', action='store_true', help='the whole CK window instead')

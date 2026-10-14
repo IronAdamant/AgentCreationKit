@@ -190,16 +190,34 @@ class CreationKit:
         user32.SetForegroundWindow(self.main)
         time.sleep(0.3)
 
-    def arrange(self, screen=(1920, 1080)) -> None:
-        """Maximise the CK and lay out: Cell View top-left, Object Window bottom-left, big render window right."""
-        user32.ShowWindow(self.main, 3)
-        sw, sh = screen
-        top, left_w = 95, int(sw * 0.29)
-        user32.SetWindowPos(self.render, None, left_w, top, sw - left_w, sh - top - 95, 0x14)
-        user32.SetWindowPos(self.cell_view, None, 0, top, left_w, int((sh - top) * 0.62), 0x14)
+    @property
+    def region(self) -> tuple[int, int, int, int]:
+        """(x, y, width, height) of the screen area the CK is laid out in: config ck_region, else the screen."""
+        if self.cfg.ck_region:
+            return self.cfg.ck_region
+        return 0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
+    def arrange(self, region: tuple[int, int, int, int] | None = None) -> None:
+        """Lay the CK out in its region (default: config ck_region, else maximised on the screen): Cell View
+        top-left, Object Window bottom-left, big render window right. Its tool windows are top-level windows, so
+        they are placed in screen coordinates."""
+        if region:
+            self.cfg.ck_region = tuple(region)
+        x0, y0, w, h = self.region
+        if self.cfg.ck_region:
+            user32.ShowWindow(self.main, 9)  # restore, then fit the region
+            user32.SetWindowPos(self.main, None, x0, y0, w, h, 0x14)
+        else:
+            user32.ShowWindow(self.main, 3)
+        top, left_w = y0 + 95, int(w * 0.29)
+        user32.SetWindowPos(self.render, None, x0 + left_w, top, w - left_w, h - 190, 0x14)
+        user32.SetWindowPos(self.cell_view, None, x0, top, left_w, int((h - 95) * 0.62), 0x14)
         ow = self.window('Object Window')
         if ow:
-            user32.SetWindowPos(ow, None, 0, top + int((sh - top) * 0.62), left_w, int((sh - top) * 0.3), 0x14)
+            user32.SetWindowPos(ow, None, x0, top + int((h - 95) * 0.62), left_w, int((h - 95) * 0.3), 0x14)
+        layers = self.window('Layers', '#32770')
+        if layers:
+            user32.ShowWindow(layers, 0)  # it opens over the render window; View > Layers brings it back
 
     # ---------------------------------------------------------------- menus and dialogs
     def menu_items(self) -> dict[str, int]:
@@ -594,7 +612,8 @@ class CreationKit:
         if not ow:
             raise CKError('the Object Window is not open')
         # Keep the list's first row visible: other tool windows (Cell View) like to sit on top of it.
-        user32.SetWindowPos(ow, None, 0, 720, 560, 300, 0x10)
+        x0, y0, _w, h = self.region
+        user32.SetWindowPos(ow, None, x0, y0 + h - 360, 560, 300, 0x10)
         tv, lv, flt = (user32.GetDlgItem(ow, i) for i in (OW_TREE, OW_LIST, OW_FILTER))
         everything = [h for h, t in self.remote.tv_items(tv) if t == '*All']
         if everything:
@@ -711,6 +730,12 @@ class CreationKit:
         """Camera position from the status bar (fresh: nudges the cursor first)."""
         self._nudge()
         cam = self.status().camera
+        if cam is None:
+            # The status bar only shows the camera once the render window has had real input (a fresh CK, or
+            # after a cell load): a tiny orbit there and back wakes it without moving the view.
+            self.orbit(4, 0, steps=4)
+            self.orbit(-4, 0, steps=4)
+            cam = self.status().camera
         if cam is None:
             raise CKError('no camera position in the status bar (is a cell loaded?)')
         return cam
