@@ -1,16 +1,51 @@
 # AgentCreationKit
 
-Tools that let AI coding agents (Claude Code, Grok Build, ...) work on Bethesda game mods without a human
-clicking through the Creation Kit or FO4Edit. Built while restoring a real Fallout 4 mod
-([Custom Legendary Modifications](https://www.nexusmods.com/fallout4/mods/5565)), so every feature exists
-because a real modding task needed it.
+Let your AI coding agent (Claude Code, Codex, Grok Build, ...) build Bethesda game mods: run xEdit scripts
+unattended, drive the Creation Kit (load, open cells, place and move objects, generate navmesh, save), read and
+write plugins, compile Papyrus and pack BA2 archives, with or without Mod Organizer 2. Built while restoring and
+updating real Fallout 4 mods ([Custom Legendary Modifications](https://www.nexusmods.com/fallout4/mods/5565),
+Sandbox Room), so every feature exists because a real modding task needed it.
 
-**Agents: read [AGENTS.md](AGENTS.md) first** (Claude Code loads it through CLAUDE.md): setup, the safety rules,
-and which command does what.
+**For modders who already work with an AI agent.** You describe the change; the agent makes it with these tools and
+checks the result. Setup is done by the agent too: it asks you for what it cannot find.
 
-Python 3.10+, Windows, no third-party dependencies. Built and verified on Fallout 4; what differs between games
-lives in one place (`ack/games.py`), so other Creation Engine games are a profile away (see
-[Other games](#other-games)).
+## Quick start
+
+```
+git clone https://github.com/IronAdamant/AgentCreationKit
+cd AgentCreationKit
+python -m ack doctor
+```
+
+Then tell your agent: *"Read AGENTS.md and set up AgentCreationKit for my game."*
+[AGENTS.md](AGENTS.md) is its manual (Claude Code loads it through CLAUDE.md): setup, the safety rules, and which
+command does what.
+
+Needs Windows, Python 3.10+ (nothing else to install), the game, xEdit (FO4Edit), and the Creation Kit for the
+CK, Papyrus and archive commands.
+
+## Built not to lose your work
+
+- A Creation Kit session always ends **closed without saving**, even when a step fails; ack never closes a CK you
+  opened yourself (it may hold your unsaved work).
+- xEdit runs are **read-only unless asked to save**, and a saving run refuses to start while a Creation Kit that
+  could save over the same plugin is open.
+- **Unknown dialogs are never clicked**: they are captured with a screenshot for review.
+- Every Creation Kit save is **checked**: masters it added, navmeshes missing from the navmesh index, ESL form IDs
+  out of range.
+
+## Status
+
+| | Fallout 4 | Skyrim Special Edition |
+|---|---|---|
+| xEdit runs, plugin read/write and checks | verified | profile only, untried |
+| Creation Kit automation | verified | not yet (needs checking against its CK) |
+| Papyrus compile, BA2 packing | verified | compile untried; Skyrim uses BSA, not BA2 |
+| Mod Organizer 2 | read-only xEdit runs verified; saving runs and the CK untried | untried |
+| Vortex | deploys into Data, so it should need nothing; untried | untried |
+
+What differs between games lives in one place (`ack/games.py`), so other Creation Engine games are a profile away
+(see [Other games](#other-games)).
 
 ## What it does
 

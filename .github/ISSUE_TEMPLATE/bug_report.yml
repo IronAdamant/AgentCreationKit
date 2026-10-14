@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in ack failed or did the wrong thing
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Everyone's setup differs, so the doctor output and the run's report are what make a problem fixable.
+        Remove anything private (user names in paths) before posting.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command, what you expected, and what it did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `python -m ack doctor`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output of the failing command
+      description: For an xEdit run, also attach report.json and xedit_log.txt from its run folder (in work_dir), and any unknown_*.bmp screenshots.
+      render: text
+  - type: input
+    id: agent
+    attributes:
+      label: Agent used, if any
+      placeholder: Claude Code, Codex, ...
