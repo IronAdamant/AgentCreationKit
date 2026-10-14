@@ -26,8 +26,9 @@ from ctypes import wintypes as W
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import win32
-from . import capture, inputs
+from .. import config, win32
+from ..plugin import check
+from . import capture, inputs, lifecycle
 from .remote import Remote
 
 user32 = win32.user32
@@ -82,6 +83,25 @@ class Status:
 
 
 @dataclass
+class SaveResult:
+    plugin: str | None
+    events: list                     # dialogs seen while saving
+    report: check.CheckReport | None  # the saved plugin checked (None: active file unknown)
+    written: bool                    # the file on disk changed
+    message: str = ''                # what the CK reported (compact)
+
+    @property
+    def ok(self) -> bool:
+        return self.written and self.report is not None and self.report.ok
+
+
+@dataclass
+class CloseResult:
+    outcome: str                     # closed | killed
+    events: list                     # dialogs seen while closing, and what was done with them
+
+
+@dataclass
 class RefData:
     editor_id: str
     position: tuple[float, float, float]
@@ -93,26 +113,37 @@ def _process_of(hwnd: int) -> int:
     return win32.window_pid(hwnd)
 
 
+def _main_class(cfg: config.Config) -> str:
+    if not cfg.game.ck_window_class:
+        raise CKError(f'ack.ck has not been checked with the {cfg.game.name} Creation Kit yet: find its main window '
+                      'class and set ck_window_class in ack/games.py (then verify each command)')
+    return cfg.game.ck_window_class
+
+
 class CreationKit:
     @classmethod
-    def launch(cls, game_dir: str | Path | None = None, timeout: float = 180) -> 'CreationKit':
-        """Start CreationKit.exe (if it isn't running) and wait for its main window."""
-        if not any(_cls(h) == 'Creation Kit' for h in _top_windows()):
+    def launch(cls, timeout: float = 180, cfg: config.Config | None = None) -> 'CreationKit':
+        """Start the Creation Kit (if it isn't running), wait for its main window, and record it as ack's session.
+        A CK that was already running is used as it is, but not recorded: close() will not touch it."""
+        cfg = cfg or config.load()
+        wanted = _main_class(cfg)
+        if not any(_cls(h) == wanted for h in _top_windows()):
             import subprocess
-            from .. import config
-            game = Path(game_dir) if game_dir else config.load().game_dir
-            subprocess.Popen([str(game / 'CreationKit.exe')], cwd=str(game))
+            proc = subprocess.Popen([str(cfg.game_dir / cfg.game.ck_exe)], cwd=str(cfg.game_dir))
+            lifecycle.write_state(lifecycle.SessionState(proc.pid), cfg)
             end = time.time() + timeout
-            while not any(_cls(h) == 'Creation Kit' for h in _top_windows()):
+            while not any(_cls(h) == wanted for h in _top_windows()):
                 if time.time() > end:
                     raise CKError('the Creation Kit did not start')
                 time.sleep(1)
-        ck = cls()
+        ck = cls(cfg)
         ck.wait_idle(timeout, settle=3)
         return ck
 
-    def __init__(self):
-        mains = [h for h in _top_windows() if _cls(h) == 'Creation Kit']
+    def __init__(self, cfg: config.Config | None = None):
+        self.cfg = cfg or config.load()
+        wanted = _main_class(self.cfg)
+        mains = [h for h in _top_windows() if _cls(h) == wanted]
         if not mains:
             raise CKError('the Creation Kit is not running')
         self.main = mains[0]
@@ -324,6 +355,10 @@ class CreationKit:
                 self.press(dlg, 'Cancel')
                 raise CKError(f'could not make {active} the active file')
         self.press(dlg, 'OK', post=True)  # OK may open the "no active file" prompt: answered in wait_idle below
+        state = lifecycle.read_state(self.cfg)
+        if state and state.pid == self.pid:
+            state.plugins, state.active = list(plugins), active
+            lifecycle.write_state(state, self.cfg)
         time.sleep(2)
 
         def answer(hwnd, title, texts):
@@ -337,9 +372,78 @@ class CreationKit:
 
         return self.wait_idle(timeout, settle=4, handle_dialog=answer)
 
-    def save(self) -> list:
-        self.menu('File/Save')
-        return self.wait_idle(120, settle=2)
+    def active_file(self) -> str | None:
+        """The plugin a save writes: as recorded by load() in ack's session, else from the title bar
+        ("Creation Kit 64-bit - [MyMod.esp] <ESL Capable - ...>"). None if there is none."""
+        state = lifecycle.read_state(self.cfg)
+        if state and state.pid == self.pid and state.plugins:
+            return state.active
+        m = re.search(r' - \[(.+?)\]', self.title)
+        return m.group(1) if m else None
+
+    def _checked_write(self, action, plugin: str | None, expected_masters: list[str] | None) -> SaveResult:
+        """Run a CK command that writes the active file, then check the file (ack.plugin.check) against its
+        masters from just before."""
+        from ..plugin import Plugin
+        plugin = plugin or self.active_file()
+        path = self.cfg.data_dir / plugin if plugin else None
+        exists = bool(path and path.exists())
+        stamp = path.stat().st_mtime_ns if exists else None
+        before = Plugin.load(path).masters if exists else None
+        events, message = action()
+        if not path:
+            return SaveResult(None, events, None, False, message)
+        written = path.exists() and path.stat().st_mtime_ns != stamp
+        report = check.check(path, self.cfg.game, expected_masters, before)
+        if not written:
+            report.add('error', 'the file was not written (nothing changed, or the save failed)')
+        return SaveResult(plugin, events, report, written, message)
+
+    def save(self, plugin: str | None = None, expected_masters: list[str] | None = None) -> SaveResult:
+        """File > Save, then check the saved plugin: no master added by the save (the CK adds them through the
+        navmesh index when other plugins are loaded), navmesh index complete, light-plugin IDs in range.
+        plugin: the active file, if ack cannot tell (see active_file)."""
+        def action():
+            self.menu('File/Save')
+            return self.wait_idle(120, settle=2), ''
+        return self._checked_write(action, plugin, expected_masters)
+
+    def close(self, timeout: float = 60, force: bool = False) -> CloseResult:
+        """Close the Creation Kit WITHOUT saving: unsaved changes are thrown away. Answers 'No' to a save prompt;
+        anything else, or a CK still open after `timeout`, is terminated (which never writes). Refuses a CK that
+        ack did not launch (it may hold a person's unsaved work) unless force."""
+        state = lifecycle.read_state(self.cfg)
+        if not force and not (state and state.pid == self.pid):
+            raise CKError("this Creation Kit was not started by ack (python -m ack ck launch): closing it without "
+                          "saving could lose someone's work. Close it by hand, or force it.")
+        events, seen = [], set()
+        win32.close(self.main)
+        t0, retried, outcome = time.time(), False, None
+        while time.time() - t0 < timeout:
+            if not win32.process_alive(self.pid):
+                outcome = 'closed'
+                break
+            for w in self.windows():
+                if w.cls != '#32770' or w.hwnd in seen or w.title in ('Cell View', 'Object Window', 'Layers'):
+                    continue
+                seen.add(w.hwnd)
+                texts = [c.text for c in w.controls if c.text]
+                said = ' '.join(texts).lower()
+                # Only ever 'No', and only to a question about saving: any other button could mean save.
+                if 'save' in said and 'without' not in said and 'No' in [t.replace('&', '') for t in texts]:
+                    self.press(w.hwnd, 'No', post=True)
+                    events.append((w.title, texts, 'pressed No'))
+                else:
+                    events.append((w.title, texts, 'left alone'))
+            if not retried and time.time() - t0 > 10 and not self.dialogs():
+                win32.close(self.main)  # the first close is sometimes ignored
+                retried = True
+            time.sleep(0.5)
+        if outcome is None:
+            win32.kill(self.pid)
+            outcome = 'killed'
+        lifecycle.clear_state(self.cfg)
+        return CloseResult(outcome, events)
 
     # ---------------------------------------------------------------- cells and references
     def cells(self) -> list[str]:
@@ -707,18 +811,21 @@ class CreationKit:
         return capture.save_window(self.render if what == 'render' else self.main, path,
                                    client_only=what == 'render')
 
-    def compact_form_ids(self) -> str:
+    def compact_form_ids(self, plugin: str | None = None, expected_masters: list[str] | None = None) -> SaveResult:
         """File > Compact Active File Form IDs (answers its confirmation). The CK hands out new form IDs from its
-        own counter, which can be past 0xFFF in an ESL: run this after creating forms in the CK, then save.
-        Renumbering invalidates saves made with the plugin and any other plugin that points at its records."""
-        self.menu('File/Compact Active File Form IDs')
-        confirm = self.wait_dialog('Confirm', 15)
-        self.press(confirm, 'Yes')
-        done = self.wait_dialog('Done', 120)
-        message = ' '.join(c.text for c in win32.child_controls(done) if c.text and c.text != 'OK')
-        self.press(done, 'OK')
-        self.wait_idle(60, settle=1)
-        return message
+        own counter, which can be past 0xFFF in an ESL. Renumbering invalidates saves made with the plugin and any
+        other plugin that points at its records.
+        It WRITES THE FILE ITSELF, with no Save (seen 2026-10-14), so it is checked like save(). It can also leave
+        the header's next object ID past the light range (0x1732 on an empty ESL)."""
+        def action():
+            self.menu('File/Compact Active File Form IDs')
+            confirm = self.wait_dialog('Confirm', 15)
+            self.press(confirm, 'Yes')
+            done = self.wait_dialog('Done', 120)
+            message = ' '.join(c.text for c in win32.child_controls(done) if c.text and c.text != 'OK')
+            self.press(done, 'OK')
+            return self.wait_idle(60, settle=1), message
+        return self._checked_write(action, plugin, expected_masters)
 
     # ---------------------------------------------------------------- navmesh
     def generate_navmesh(self, timeout: float = 2400) -> list:

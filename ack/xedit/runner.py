@@ -27,8 +27,10 @@ from .. import win32
 from .dialogs import DialogWatcher
 
 SCRIPTS = Path(__file__).with_name('scripts')
-OFFICIAL_MASTERS = ['Fallout4.esm', 'DLCRobot.esm', 'DLCworkshop01.esm', 'DLCCoast.esm',
-                    'DLCworkshop02.esm', 'DLCworkshop03.esm', 'DLCNukaWorld.esm']
+
+
+class Refused(RuntimeError):
+    """The run was not started because it could not be done safely."""
 
 
 @dataclass
@@ -72,8 +74,14 @@ def _plugin_list(masters: list[str], target: str, after: list[str] | None = None
 def run(script: str, target: str, *, save: bool = False, masters: list[str] | None = None,
         timeout: float = 900, params: dict[str, str] | None = None, also_load: list[str] | None = None,
         cfg: cfg_mod.Config | None = None) -> RunReport:
-    """also_load: extra plugins loaded after the target (e.g. add-ons that use the target as a master)."""
+    """also_load: extra plugins loaded after the target (e.g. add-ons that use the target as a master).
+    masters: plugins loaded before the target (default: the game's official masters)."""
     cfg = cfg or cfg_mod.load()
+    if save:
+        from ..ck.lifecycle import save_blocker
+        blocker = save_blocker([target] + list(also_load or []), cfg)
+        if blocker:
+            raise Refused(blocker)
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     # A bundled script name, or a path to a project's own .pas template (e.g. kept in the mod's repo).
     script_path = Path(script) if script.lower().endswith('.pas') else SCRIPTS / f'{script}.pas'
@@ -99,10 +107,12 @@ def run(script: str, target: str, *, save: bool = False, masters: list[str] | No
 
     # 2. plugin list
     plugins = out / 'plugins.txt'
-    plugins.write_text(_plugin_list(masters or OFFICIAL_MASTERS, target, also_load), encoding='utf8')
+    plugins.write_text(_plugin_list(masters or list(cfg.game.masters), target, also_load), encoding='utf8')
 
     report = RunReport(script, target, save, str(out))
     args = [str(cfg.xedit_exe), '-IKnowWhatImDoing', f'-P:{plugins}', '-autoload', f'-script:{script_name}', '-autoexit']
+    if cfg.xedit_exe.name.lower() != cfg.game.xedit_exe.lower():
+        args.insert(1, cfg.game.xedit_mode)  # a generic xEdit.exe picks the game from its name otherwise
     (out / 'command.txt').write_text(subprocess.list2cmdline(args), encoding='utf8')
 
     # 3. launch + watch

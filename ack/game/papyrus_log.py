@@ -1,7 +1,8 @@
-"""Switch the game's Papyrus script log on or off (Fallout4Custom.ini), for debugging scripts in-game.
+"""Switch the game's Papyrus script log on or off (the custom ini, e.g. Fallout4Custom.ini), for debugging scripts
+in-game.
 
 "on" writes a [Papyrus] section with logging, tracing and debug info enabled; "off" removes exactly that section,
-leaving the rest of the file alone. Logs: Documents/My Games/Fallout4/Logs/Script/Papyrus.0.log (newest session),
+leaving the rest of the file alone. Logs: Documents/My Games/<game>/Logs/Script/Papyrus.0.log (newest session),
 and user logs (Debug.OpenUserLog) in Logs/Script/User/<name>.0.log. Debug.Trace/TraceUser lines only appear from
 scripts compiled without -release/-final.
 """
@@ -9,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-INI = Path.home() / 'Documents' / 'My Games' / 'Fallout4' / 'Fallout4Custom.ini'
-LOGS = Path.home() / 'Documents' / 'My Games' / 'Fallout4' / 'Logs' / 'Script'
+from .. import config
+
 SECTION = ['[Papyrus]', 'bEnableLogging=1', 'bEnableTrace=1', 'bLoadDebugInformation=1']
 
 
@@ -25,14 +26,24 @@ def _strip(lines: list[str]) -> list[str]:
     return out
 
 
+def ini_path() -> Path:
+    cfg = config.load()
+    return cfg.my_games_dir / cfg.game.custom_ini
+
+
+def logs_dir() -> Path:
+    return config.load().my_games_dir / 'Logs' / 'Script'
+
+
 def _lines(ini: Path) -> list[str]:
     return ini.read_text(encoding='utf8').splitlines() if ini.exists() else []
 
 
-def is_on(ini: Path = INI) -> bool:
-    return any(l.strip().lower() == '[papyrus]' for l in _lines(ini))
+def is_on(ini: Path | None = None) -> bool:
+    return any(l.strip().lower() == '[papyrus]' for l in _lines(ini or ini_path()))
 
 
-def set_logging(on: bool, ini: Path = INI) -> None:
+def set_logging(on: bool, ini: Path | None = None) -> None:
+    ini = ini or ini_path()
     lines = _strip(_lines(ini)) + (SECTION if on else [])
     ini.write_text('\n'.join(lines) + '\n', encoding='utf8')

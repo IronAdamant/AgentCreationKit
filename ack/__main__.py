@@ -3,21 +3,28 @@
     python -m ack xedit run <script> <plugin> [--save] [--timeout S]
     python -m ack xedit scripts
     python -m ack plugin info <path>
+    python -m ack plugin check <path> [--masters M ...]
     python -m ack ba2 extract <archive> <pattern>... --out DIR
     python -m ack ck <command> ...        drive a running Creation Kit (python -m ack ck -h)
+    python -m ack ck run <steps.txt>      several ck commands in one session that always ends closed
 """
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from collections import Counter
 from pathlib import Path
 
 
 def cmd_xedit_run(a):
-    from .xedit.runner import run
+    from .xedit.runner import Refused, run
     params = dict(kv.split('=', 1) for kv in a.param)
-    report = run(a.script, a.plugin, save=a.save, timeout=a.timeout, params=params, also_load=a.also_load)
+    try:
+        report = run(a.script, a.plugin, save=a.save, timeout=a.timeout, params=params, also_load=a.also_load)
+    except Refused as e:
+        print(f'refused: {e}')
+        return 2
     print(report.summary())
     return 0 if report.outcome == 'done' and not report.unknown_dialogs else 1
 
@@ -43,6 +50,22 @@ def cmd_plugin_info(a):
     return 0
 
 
+def _data_path(name: str) -> Path:
+    """A plugin path, or a bare file name in the game's Data folder."""
+    if Path(name).exists():
+        return Path(name)
+    from . import config
+    return config.load().data_dir / name
+
+
+def cmd_plugin_check(a):
+    from . import games
+    from .plugin.check import check
+    report = check(_data_path(a.path), games.get(a.game) if a.game else None, a.masters)
+    print(report.summary())
+    return 0 if report.ok else 1
+
+
 def cmd_ba2_extract(a):
     from .archive import extract_general, extract_textures
     got = extract_general(a.archive, a.patterns, a.out) if 'texture' not in Path(a.archive).name.lower() \
@@ -56,14 +79,37 @@ def _axes(values):
     return None if values is None else tuple(None if v == '_' else float(v) for v in values)
 
 
-def cmd_ck(a):
+def _print_save(result) -> int:
+    for title, texts in result.events:
+        print(f'dialog {title!r}: {" | ".join(texts)}')
+    if result.report is None:
+        print('written, NOT checked: ack cannot tell the active file (pass --plugin NAME)')
+        return 1
+    print(result.report.summary())
+    return 0 if result.ok else 1
+
+
+def cmd_ck(a, ck=None):
     from .ck import CreationKit
     c = a.cmd
     if c == 'launch':
         ck = CreationKit.launch()
         print(ck.title)
         return 0
-    ck = CreationKit()
+    if c == 'run':
+        return cmd_ck_run(a)
+    if c == 'close':
+        from .ck import lifecycle
+        if not lifecycle.running():
+            lifecycle.clear_state()
+            print('the Creation Kit is not running')
+            return 0
+        result = (ck or CreationKit()).close(force=a.force)
+        for title, texts, done in result.events:
+            print(f'dialog {title!r}: {" | ".join(texts)} -> {done}')
+        print(f'{result.outcome} without saving')
+        return 0
+    ck = ck or CreationKit()
     if c == 'status':
         st = ck.status()
         print(f'title:     {ck.title}\nselection: {st.selection}\ncamera:    {st.camera} in {st.cell}')
@@ -113,8 +159,7 @@ def cmd_ck(a):
             print('pivot', tuple(round(v) for v in pivot))
         print(ck.camera())
     elif c == 'save':
-        for title, texts in ck.save():
-            print(f'dialog {title!r}: {" | ".join(texts)}')
+        return _print_save(ck.save(a.plugin, a.masters))
     elif c == 'place':
         d = ck.place(a.base, a.editor_id, _axes(a.pos), _axes(a.rot), a.scale)
         print(f'{d.editor_id or "(no editor ID)"}: position {d.position} rotation {d.rotation} scale {d.scale}')
@@ -122,23 +167,59 @@ def cmd_ck(a):
         ck.delete(a.editor_id)
         print('deleted', a.editor_id)
     elif c == 'compact':
-        print(ck.compact_form_ids())
+        result = ck.compact_form_ids(a.plugin, a.masters)
+        print(result.message)
+        return _print_save(result)
     elif c == 'navmesh':
         for title, texts in ck.generate_navmesh():
             print(f'dialog {title!r}: {" | ".join(texts)}')
     return 0
 
 
+def cmd_ck_run(a):
+    """Run the steps file's ck commands in one session: launch if needed, then always close without saving at the
+    end, even when a step fails. Save with a `save` step; a failed save check stops the run."""
+    from .ck import CKError, CreationKit, lifecycle
+    if lifecycle.running() and not lifecycle.read_state():
+        print('refused: a Creation Kit that ack did not start is open (it may hold unsaved work): close it first')
+        return 2
+    lines = [l.strip() for l in Path(a.steps).read_text(encoding='utf8').splitlines()]
+    steps = [l for l in lines if l and not l.startswith('#')]
+    parser = build_parser()
+    parsed = []
+    for step in steps:  # parse everything first: a typo should fail before the CK is touched
+        args = parser.parse_args(['ck'] + shlex.split(step))
+        if args.cmd in ('run', 'launch', 'close'):
+            raise SystemExit(f'step {step!r}: run/launch/close are handled by ck run itself')
+        parsed.append((step, args))
+    code = 0
+    ck = CreationKit.launch()
+    try:
+        for step, args in parsed:
+            print(f'> {step}')
+            if cmd_ck(args, ck) != 0:
+                print(f'step failed: {step}')
+                code = 1
+                break
+    except (CKError, OSError) as e:
+        print(f'step failed: {e}')
+        code = 1
+    finally:
+        result = ck.close()
+        print(f'Creation Kit {result.outcome} without saving')
+    return code
+
+
 def cmd_papyrus_log(a):
     from ack.game import papyrus_log
     if a.state:
         papyrus_log.set_logging(a.state == 'on')
-    print(f'Papyrus logging is {"on" if papyrus_log.is_on() else "off"} ({papyrus_log.INI})')
-    print(f'logs: {papyrus_log.LOGS}')
+    print(f'Papyrus logging is {"on" if papyrus_log.is_on() else "off"} ({papyrus_log.ini_path()})')
+    print(f'logs: {papyrus_log.logs_dir()}')
     return 0
 
 
-def main(argv=None):
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog='ack', description='AgentCreationKit: tools for AI agents working on Bethesda mods')
     sub = ap.add_subparsers(dest='area', required=True)
 
@@ -159,6 +240,11 @@ def main(argv=None):
     i = p.add_parser('info')
     i.add_argument('path')
     i.set_defaults(func=cmd_plugin_info)
+    ch = p.add_parser('check', help='masters, navmesh index and light-plugin ID range: the things a CK save breaks')
+    ch.add_argument('path', help='plugin path, or a file name in the Data folder')
+    ch.add_argument('--masters', nargs='+', metavar='MASTER', help='the exact master list it must have')
+    ch.add_argument('--game', help='game profile (default: config.local.json)')
+    ch.set_defaults(func=cmd_plugin_check)
 
     b = sub.add_parser('ba2', help='BA2 archives').add_subparsers(dest='cmd', required=True)
     e = b.add_parser('extract')
@@ -169,6 +255,11 @@ def main(argv=None):
 
     k = sub.add_parser('ck', help='drive a running Creation Kit').add_subparsers(dest='cmd', required=True)
     k.add_parser('launch', help='start the Creation Kit (if needed) and wait until it is ready')
+    cl = k.add_parser('close', help='close the Creation Kit WITHOUT saving (only one ack launched, unless --force)')
+    cl.add_argument('--force', action='store_true', help="also close a CK ack did not start (loses its unsaved work)")
+    rn = k.add_parser('run', help='run a file of ck commands (one per line) in one session, then always close it '
+                                  'without saving, even if a step fails')
+    rn.add_argument('steps')
     k.add_parser('status', help='active file, selection, camera position')
     k.add_parser('arrange', help='bring to front; big render window, Cell View and Object Window on the left')
     s_ = k.add_parser('shot', help='screenshot the render window (brings the CK to the front)')
@@ -201,18 +292,32 @@ def main(argv=None):
     ca = k.add_parser('camera', help='top | bright | zoom N (positive = in) | pan DX DY | orbit DX DY (pixels; Shift+mouse around the selection) | look YAW PITCH [DISTANCE] (degrees: bearing from the selection, 0 = north; elevation, 90 = overhead)')
     ca.add_argument('action', choices=['top', 'bright', 'zoom', 'pan', 'orbit', 'look'])
     ca.add_argument('values', nargs='*')
-    k.add_parser('save', help='File > Save')
+    sv = k.add_parser('save', help='File > Save, then check the saved plugin (masters, navmesh index, light IDs)')
     k.add_parser('navmesh', help='Recast navmesh for the loaded cell, then finalize')
-    k.add_parser('compact', help='Compact Active File Form IDs (keeps a CK-edited ESL inside its ID range)')
+    co = k.add_parser('compact', help='Compact Active File Form IDs (renumbers a CK-edited ESL into its ID range). '
+                                      'It writes the file itself, so it is checked like save')
+    for p_ in (sv, co):
+        p_.add_argument('--plugin', help='the active file, if ack cannot tell')
+        p_.add_argument('--masters', nargs='+', metavar='MASTER', help='the exact master list it must have')
     for p_ in k.choices.values():
         p_.set_defaults(func=cmd_ck)
 
-    pl = sub.add_parser('papyrus-log', help="switch the game's Papyrus script log on/off (Fallout4Custom.ini)")
+    pl = sub.add_parser('papyrus-log', help="switch the game's Papyrus script log on/off (its custom ini, e.g. Fallout4Custom.ini)")
     pl.add_argument('state', nargs='?', choices=['on', 'off'], help='omit to show the current state')
     pl.set_defaults(func=cmd_papyrus_log)
+    return ap
 
-    a = ap.parse_args(argv)
-    return a.func(a)
+
+def main(argv=None):
+    a = build_parser().parse_args(argv)
+    if a.area != 'ck':
+        return a.func(a)
+    from .ck import CKError
+    try:
+        return a.func(a)
+    except CKError as e:
+        print(f'error: {e}')
+        return 1
 
 
 if __name__ == '__main__':

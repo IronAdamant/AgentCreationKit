@@ -33,6 +33,9 @@
                    replaced by that record's FormID
     field.add    | EDID | PATH | VALUE                                like field.set, but first adds the field
                    if the record lacks it (e.g. an OMOD's LNAM loose mod)
+    ref.move     | REF_EDID | X Y Z | RX RY RZ                        set a placed reference's position and
+                   rotation (degrees, as the Creation Kit's Reference dialog shows them); "_" keeps an axis,
+                   "-" keeps all three. The xEdit way to do what the CK's Reference dialog does
 
   PROPERTY[key]#n selects the n-th (1-based, default 1) property with that name; [key] filters on Value 1,
   e.g. DamageTypeValues[dtEnergy]#2. VALUE goes to Value 2 for "FormID,Float"/"FormID,Int" properties
@@ -85,8 +88,60 @@ begin
 end;
 
 function FindRec(edid: string): IInterface;
+var
+  i: integer;
+  e: IInterface;
 begin
   Result := FindIn(f, edid);
+  if Assigned(Result) then
+    Exit;
+  // placed references live inside cell groups, out of MainRecordByEditorID's reach: scan the target's records
+  for i := 0 to RecordCount(f) - 1 do begin
+    e := RecordByIndex(f, i);
+    if SameText(EditorID(e), edid) then begin
+      Result := e;
+      Exit;
+    end;
+  end;
+end;
+
+function AxisList(xyz: string): TStringList;
+begin
+  Result := TStringList.Create;
+  Result.Delimiter := ' ';
+  Result.StrictDelimiter := True;
+  Result.DelimitedText := xyz;
+end;
+
+// "X Y Z" with "_" for an axis to keep, or "-" to keep all three
+function ValidAxes(xyz: string): boolean;
+var
+  sl: TStringList;
+begin
+  sl := AxisList(xyz);
+  Result := (xyz = '-') or (sl.Count = 3);
+  sl.Free;
+end;
+
+// Set path\X, path\Y, path\Z from a ValidAxes list
+procedure SetAxes(rec: IInterface; path, xyz: string);
+var
+  sl: TStringList;
+  i: integer;
+begin
+  if xyz = '-' then
+    Exit;
+  sl := AxisList(xyz);
+  for i := 0 to 2 do
+    if sl[i] <> '_' then
+      SetElementEditValues(rec, path + '\' + Copy('XYZ', i + 1, 1), sl[i]);
+  sl.Free;
+end;
+
+function Axes(rec: IInterface; path: string): string;
+begin
+  Result := GetElementEditValues(rec, path + '\X') + ' ' + GetElementEditValues(rec, path + '\Y') + ' ' +
+    GetElementEditValues(rec, path + '\Z');
 end;
 
 function FindAny(edid: string): IInterface;
@@ -368,6 +423,20 @@ begin
     before := Name(rec);
     Remove(rec);
     Ok(line, 'deleted ' + before);
+  end
+  else if op = 'ref.move' then begin
+    if not Assigned(ElementByPath(rec, 'DATA\Position')) then begin
+      Fail(line, Name(rec) + ' is not a placed reference');
+      Exit;
+    end;
+    if not ValidAxes(a) or not ValidAxes(b) then begin
+      Fail(line, 'positions and rotations are three values each ("_" keeps one), or "-"');
+      Exit;
+    end;
+    before := Axes(rec, 'DATA\Position') + ' / ' + Axes(rec, 'DATA\Rotation');
+    SetAxes(rec, 'DATA\Position', a);
+    SetAxes(rec, 'DATA\Rotation', b);
+    Ok(line, before + '  =>  ' + Axes(rec, 'DATA\Position') + ' / ' + Axes(rec, 'DATA\Rotation'));
   end
   else if (op = 'field.set') or (op = 'field.add') then begin
     p := ElementByPath(rec, a);

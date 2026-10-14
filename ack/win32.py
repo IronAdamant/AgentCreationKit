@@ -175,3 +175,43 @@ def control_text(hwnd: int) -> str:
     if n > 1 and raw[1:2] == b'\x00':  # real UTF-16 text
         return raw.decode('utf-16-le', 'replace').split('\x00')[0]
     return raw.split(b'\x00')[0].decode('utf-8', 'replace')
+
+
+kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+SYNCHRONIZE, PROCESS_TERMINATE = 0x00100000, 0x0001
+
+
+def process_alive(pid: int) -> bool:
+    h = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+    if not h:
+        return False
+    try:
+        return kernel32.WaitForSingleObject(h, 0) == 0x102  # WAIT_TIMEOUT: still running
+    finally:
+        kernel32.CloseHandle(h)
+
+
+def kill(pid: int) -> bool:
+    """Terminate a process. A terminated program writes nothing more (no save on the way out)."""
+    h = kernel32.OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, False, pid)
+    if not h:
+        return False
+    try:
+        kernel32.TerminateProcess(h, 1)
+        return kernel32.WaitForSingleObject(h, 10000) == 0
+    finally:
+        kernel32.CloseHandle(h)
+
+
+def pids_of(exe_name: str) -> list[int]:
+    """Process IDs of every running program with this exe name."""
+    import csv
+    import subprocess
+    out = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {exe_name}', '/FO', 'CSV', '/NH'],
+                         capture_output=True, text=True).stdout
+    return [int(row[1]) for row in csv.reader(out.splitlines()) if len(row) > 1 and row[0].lower() == exe_name.lower()]
